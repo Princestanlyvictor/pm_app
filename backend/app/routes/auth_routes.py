@@ -29,7 +29,18 @@ async def register(payload: RegisterRequest):
     if existing_request:
         raise HTTPException(status_code=400, detail="Request already submitted, waiting for approval")
 
-    # Create account request instead of directly creating user
+    # Project managers and admins are created directly without approval
+    if payload.role in ["admin", "project_manager"]:
+        user_doc = {
+            "email": payload.email,
+            "password_hash": hash_password(payload.password),
+            "role": payload.role,
+            "created_at": datetime.utcnow()
+        }
+        result = await users.insert_one(user_doc)
+        return {"message": f"{payload.role.capitalize()} account created successfully", "id": str(result.inserted_id)}
+    
+    # Other roles need approval
     request_doc = {
         "email": payload.email,
         "password_hash": hash_password(payload.password),
