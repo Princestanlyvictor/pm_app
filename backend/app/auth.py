@@ -6,8 +6,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Password hashing
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# Use Argon2 (no 72-byte limit)
+pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
 
 SECRET_KEY = os.getenv("SECRET_KEY", "change-this-secret")
 ALGORITHM = "HS256"
@@ -24,10 +24,5 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 
 def create_access_token(sub: str, role: str):
     expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    payload = {
-        "sub": sub,
-        "role": role,
-        "exp": expire
-    }
-    token = jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
-    return token
+    payload = {"sub": sub, "role": role, "exp": expire}
+    return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)

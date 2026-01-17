@@ -377,7 +377,7 @@ export default function KanbanBoard({ onNavigateToChat, onNavigateBack }: Kanban
                         marginBottom: 8,
                         wordBreak: "break-word"
                       }}>
-                        🏷️ {task.dependencies.length} tagged
+                        {task.dependencies.length} tagged
                       </div>
                     )}
 

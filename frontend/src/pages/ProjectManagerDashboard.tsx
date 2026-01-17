@@ -1,10 +1,12 @@
-import { useContext, useState } from "react";
+import { useContext, useEffect, useState, useCallback } from "react";
 import { AuthContext } from "../context/AuthContext";
 import api from "../services/api";
 
 interface ProjectManagerDashboardProps {
   onNavigateToChat?: () => void;
   onNavigateToKanban?: () => void;
+  onNavigateToProjects?: () => void;
+  onNavigateToTeamMembers?: () => void;
 }
 
 interface TaskType {
@@ -22,35 +24,105 @@ interface TaskType {
 }
 
 interface TeamMemberType {
+  id: string;
   email: string;
-  user_id: string;
-  task_count: number;
+  role: string;
 }
 
-export default function ProjectManagerDashboard({ onNavigateToChat, onNavigateToKanban }: ProjectManagerDashboardProps) {
+interface AccountRequestType {
+  _id: string;
+  email: string;
+  status: "pending" | "approved" | "rejected";
+  requested_at: string;
+  requested_by: string;
+}
+
+interface TodayTaskBreakdown {
+  email: string;
+  user_id: string;
+  total_tasks: number;
+  status_counts: Record<string, number>;
+  priority_counts: Record<string, number>;
+  tasks: Array<{
+    id: string;
+    title: string;
+    status: string;
+    priority: string;
+    project_id: string;
+  }>;
+}
+
+export default function ProjectManagerDashboard({ onNavigateToChat, onNavigateToKanban, onNavigateToProjects, onNavigateToTeamMembers }: ProjectManagerDashboardProps) {
   const { user, logout, token } = useContext(AuthContext);
-  const [projectId, setProjectId] = useState("");
   const [teamMembers, setTeamMembers] = useState<TeamMemberType[]>([]);
   const [selectedMember, setSelectedMember] = useState<string | null>(null);
   const [memberTasksByDate, setMemberTasksByDate] = useState<Record<string, TaskType[]>>({});
+  const [todayBreakdown, setTodayBreakdown] = useState<TodayTaskBreakdown[]>([]);
   const [loading, setLoading] = useState(false);
-  const [projectLoaded, setProjectLoaded] = useState(false);
+  const [loadingToday, setLoadingToday] = useState(false);
   const [showOnlyToday, setShowOnlyToday] = useState(true);
+  const [accountRequests, setAccountRequests] = useState<AccountRequestType[]>([]);
+  const [loadingRequests, setLoadingRequests] = useState(false);
 
-  // Get today's date in YYYY-MM-DD format
   const getTodayDate = () => {
     const today = new Date();
     return today.toISOString().split('T')[0];
   };
 
-  const fetchTeamMembers = async (pId: string) => {
+  const fetchAccountRequests = async () => {
     try {
-      setLoading(true);
-      const response = await api.get(`/reports/team-members/${pId}`, {
+      setLoadingRequests(true);
+      const response = await api.get(`/reports/account-requests`, {
         headers: { Authorization: `Bearer ${token}` }
       });
-      setTeamMembers(response.data);
-      setProjectLoaded(true);
+      setAccountRequests(response.data);
+    } catch (err) {
+      console.error("Failed to fetch account requests", err);
+    } finally {
+      setLoadingRequests(false);
+    }
+  };
+
+  const handleApproveRequest = async (requestId: string, email: string) => {
+    try {
+      await api.post(
+        `/reports/account-requests/${requestId}/approve`,
+        { email },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      alert("Request approved! User added to team.");
+      fetchAccountRequests();
+      fetchAllTeamMembers();
+    } catch (err) {
+      alert("Failed to approve request");
+      console.error(err);
+    }
+  };
+
+  const handleRejectRequest = async (requestId: string) => {
+    try {
+      await api.post(
+        `/reports/account-requests/${requestId}/reject`,
+        {},
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      alert("Request rejected.");
+      fetchAccountRequests();
+    } catch (err) {
+      alert("Failed to reject request");
+      console.error(err);
+    }
+  };
+
+  const fetchAllTeamMembers = useCallback(async () => {
+    try {
+      setLoading(true);
+      const response = await api.get(`/auth/users`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const users = (response.data || []) as Array<{ id: string; email: string; role: string }>;
+      const members: TeamMemberType[] = users.filter((u) => u.role === "team_member");
+      setTeamMembers(members);
       setMemberTasksByDate({});
       setSelectedMember(null);
     } catch (err) {
@@ -59,12 +131,26 @@ export default function ProjectManagerDashboard({ onNavigateToChat, onNavigateTo
     } finally {
       setLoading(false);
     }
-  };
+  }, [token]);
 
-  const fetchMemberTasks = async (pId: string, memberEmail: string) => {
+  const fetchTodayBreakdown = useCallback(async () => {
+    try {
+      setLoadingToday(true);
+      const response = await api.get(`/reports/tasks/today/breakdown`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setTodayBreakdown(response.data);
+    } catch (err) {
+      console.error("Failed to fetch today's tasks breakdown", err);
+    } finally {
+      setLoadingToday(false);
+    }
+  }, [token]);
+
+  const fetchMemberTasks = async (memberEmail: string) => {
     try {
       setLoading(true);
-      const response = await api.get(`/reports/tasks/${pId}/by-member/${memberEmail}`, {
+      const response = await api.get(`/reports/tasks/by-member/${memberEmail}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       setMemberTasksByDate(response.data);
@@ -77,17 +163,16 @@ export default function ProjectManagerDashboard({ onNavigateToChat, onNavigateTo
     }
   };
 
-  const handleViewProject = async () => {
-    if (!projectId) {
-      alert("Please enter a Project ID");
-      return;
-    }
-    await fetchTeamMembers(projectId);
+  const handleSelectMember = (memberEmail: string) => {
+    fetchMemberTasks(memberEmail);
   };
 
-  const handleSelectMember = (memberEmail: string) => {
-    fetchMemberTasks(projectId, memberEmail);
-  };
+  useEffect(() => {
+    if (token) {
+      fetchAllTeamMembers();
+      fetchTodayBreakdown();
+    }
+  }, [token, fetchAllTeamMembers, fetchTodayBreakdown]);
 
   const getPriorityColor = (priority: string) => {
     switch (priority) {
@@ -116,206 +201,457 @@ export default function ProjectManagerDashboard({ onNavigateToChat, onNavigateTo
   };
 
   return (
-    <div style={{ padding: 40 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 30 }}>
-        <div>
-          <h1>Project Manager Dashboard</h1>
-          <div style={{ backgroundColor: "#f0f0f0", padding: 20, borderRadius: 8 }}>
-            <h2>Account Information</h2>
-            <p><strong>Email:</strong> {user?.email}</p>
-            <p><strong>Role:</strong> {user?.role}</p>
+    <div style={{ display: "flex", minHeight: "100vh", backgroundColor: "#f5f5f5" }}>
+      {/* Sidebar */}
+      <div style={{
+        width: 280,
+        backgroundColor: "#2c3e50",
+        color: "white",
+        padding: "20px",
+        overflowY: "auto",
+        boxShadow: "2px 0 8px rgba(0,0,0,0.1)"
+      }}>
+        <div style={{ marginBottom: 30 }}>
+          <h2 style={{ margin: "0 0 10px 0", fontSize: 20, color: "#3498db" }}>📊 PM Dashboard</h2>
+          <div style={{ fontSize: 12, color: "#bdc3c7", marginTop: 15 }}>
+            <p style={{ margin: "8px 0" }}><strong>User:</strong></p>
+            <p style={{ margin: "5px 0", wordBreak: "break-all" }}>{user?.email}</p>
+            <p style={{ margin: "8px 0 5px 0" }}><strong>Role:</strong></p>
+            <p style={{ margin: "5px 0", textTransform: "capitalize" }}>{user?.role}</p>
           </div>
         </div>
-        <div style={{ display: "flex", gap: 10 }}>
-          {onNavigateToKanban && (
-            <button
-              onClick={onNavigateToKanban}
-              style={{ padding: "10px 20px", backgroundColor: "#6f42c1", color: "white", border: "none", borderRadius: 4, cursor: "pointer" }}
-            >
-              📊 Kanban Board
-            </button>
-          )}
-          {onNavigateToChat && (
-            <button
-              onClick={onNavigateToChat}
-              style={{ padding: "10px 20px", backgroundColor: "#007bff", color: "white", border: "none", borderRadius: 4, cursor: "pointer" }}
-            >
-              💬 Open Chat
-            </button>
-          )}
+
+        {/* Team Members Section - shown by default */}
+        <div style={{ borderTop: "1px solid #34495e", paddingTop: 20, marginBottom: 20 }}>
+          <button
+            onClick={onNavigateToTeamMembers}
+            style={{
+              width: "100%",
+              padding: "12px 15px",
+              backgroundColor: "#e67e22",
+              color: "white",
+              border: "none",
+              borderRadius: 4,
+              cursor: "pointer",
+              textAlign: "left",
+              fontSize: 14,
+              fontWeight: "500",
+              transition: "background 0.3s"
+            }}
+            onMouseOver={(e) => (e.currentTarget.style.backgroundColor = "#d35400")}
+            onMouseOut={(e) => (e.currentTarget.style.backgroundColor = "#e67e22")}
+          >
+            👥 Team Members
+          </button>
+        </div>
+
+        <div style={{ borderTop: "1px solid #34495e", paddingTop: 20, marginBottom: 20 }}>
+          <h3 style={{ margin: "0 0 15px 0", fontSize: 14, color: "#95a5a6" }}>NAVIGATION</h3>
+          <button
+            onClick={onNavigateToProjects}
+            style={{
+              width: "100%",
+              padding: "12px 15px",
+              backgroundColor: "#9b59b6",
+              color: "white",
+              border: "none",
+              borderRadius: 4,
+              cursor: "pointer",
+              marginBottom: 10,
+              textAlign: "left",
+              fontSize: 14,
+              fontWeight: "500",
+              transition: "background 0.3s"
+            }}
+            onMouseOver={(e) => (e.currentTarget.style.backgroundColor = "#8e44ad")}
+            onMouseOut={(e) => (e.currentTarget.style.backgroundColor = "#9b59b6")}
+          >
+            📁 Projects
+          </button>
+          <button
+            onClick={onNavigateToKanban}
+            style={{
+              width: "100%",
+              padding: "12px 15px",
+              backgroundColor: "#3498db",
+              color: "white",
+              border: "none",
+              borderRadius: 4,
+              cursor: "pointer",
+              marginBottom: 10,
+              textAlign: "left",
+              fontSize: 14,
+              fontWeight: "500",
+              transition: "background 0.3s"
+            }}
+            onMouseOver={(e) => (e.currentTarget.style.backgroundColor = "#2980b9")}
+            onMouseOut={(e) => (e.currentTarget.style.backgroundColor = "#3498db")}
+          >
+            📊 Kanban Board
+          </button>
+          <button
+            onClick={onNavigateToChat}
+            style={{
+              width: "100%",
+              padding: "12px 15px",
+              backgroundColor: "#2ecc71",
+              color: "white",
+              border: "none",
+              borderRadius: 4,
+              cursor: "pointer",
+              marginBottom: 10,
+              textAlign: "left",
+              fontSize: 14,
+              fontWeight: "500",
+              transition: "background 0.3s"
+            }}
+            onMouseOver={(e) => (e.currentTarget.style.backgroundColor = "#27ae60")}
+            onMouseOut={(e) => (e.currentTarget.style.backgroundColor = "#2ecc71")}
+          >
+            💬 Team Chat
+          </button>
+        </div>
+
+        {/* Note: team members sidebar above; removed project-gated section */}
+
+        <div style={{ borderTop: "1px solid #34495e", paddingTop: 20 }}>
           <button
             onClick={logout}
-            style={{ padding: "10px 20px", backgroundColor: "#ff6b6b", color: "white", border: "none", borderRadius: 4, cursor: "pointer" }}
+            style={{
+              width: "100%",
+              padding: "12px 15px",
+              backgroundColor: "#e74c3c",
+              color: "white",
+              border: "none",
+              borderRadius: 4,
+              cursor: "pointer",
+              textAlign: "left",
+              fontSize: 14,
+              fontWeight: "500",
+              transition: "background 0.3s"
+            }}
+            onMouseOver={(e) => (e.currentTarget.style.backgroundColor = "#c0392b")}
+            onMouseOut={(e) => (e.currentTarget.style.backgroundColor = "#e74c3c")}
           >
-            Logout
+            🚪 Logout
           </button>
         </div>
       </div>
 
-      <div style={{ marginBottom: 30 }}>
-        <h2>Project Tracking</h2>
-        <div style={{ border: "1px solid #ddd", padding: 20, borderRadius: 8, marginBottom: 20 }}>
-          <div style={{ marginBottom: 15 }}>
-            <label htmlFor="projectId" style={{ display: "block", marginBottom: 5, fontWeight: "bold" }}>
-              Project ID:
-            </label>
-            <input
-              id="projectId"
-              type="text"
-              placeholder="Enter Project ID to view team members"
-              value={projectId}
-              onChange={(e) => setProjectId(e.target.value)}
-              style={{ width: "100%", padding: 10, borderRadius: 4, border: "1px solid #ddd", marginBottom: 10 }}
-            />
+      {/* Main Content */}
+      <div style={{ flex: 1, padding: 40, overflowY: "auto" }}>
+        <h1 style={{ marginTop: 0, marginBottom: 30 }}>Project Manager Dashboard</h1>
+
+        {/* Home Section - Today's Task Breakdown */}
+        <div style={{ marginBottom: 40 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+            <h2 style={{ marginTop: 0 }}>📅 Today's Task Breakdown</h2>
+            <button
+              onClick={fetchTodayBreakdown}
+              disabled={loadingToday}
+              style={{
+                padding: "8px 16px",
+                backgroundColor: "#3498db",
+                color: "white",
+                border: "none",
+                borderRadius: 4,
+                cursor: loadingToday ? "not-allowed" : "pointer",
+                fontSize: 12,
+                fontWeight: "500"
+              }}
+            >
+              {loadingToday ? "Loading..." : "Refresh"}
+            </button>
           </div>
 
-          <button
-            onClick={handleViewProject}
-            disabled={loading}
-            style={{ padding: 10, backgroundColor: "#007bff", color: "white", border: "none", borderRadius: 4, cursor: "pointer", width: "100%" }}
-          >
-            {loading ? "Loading..." : "View Team Members"}
-          </button>
-        </div>
-
-        {/* Team Members List */}
-        {projectLoaded && teamMembers.length > 0 && (
-          <div style={{ marginBottom: 30 }}>
-            <h3>👥 Team Members ({teamMembers.length})</h3>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(250px, 1fr))", gap: 15 }}>
-              {teamMembers.map((member) => (
+          {loadingToday ? (
+            <div style={{ padding: 20, color: "#666" }}>Loading today's tasks...</div>
+          ) : todayBreakdown.length > 0 ? (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: 20 }}>
+              {todayBreakdown.map((member) => (
                 <div
                   key={member.email}
                   onClick={() => handleSelectMember(member.email)}
                   style={{
-                    padding: 15,
-                    border: selectedMember === member.email ? "3px solid #007bff" : "1px solid #ddd",
+                    padding: 20,
+                    backgroundColor: "white",
                     borderRadius: 8,
-                    backgroundColor: selectedMember === member.email ? "#e7f3ff" : "#f9f9f9",
+                    boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
+                    border: "2px solid #ecf0f1",
                     cursor: "pointer",
-                    boxShadow: selectedMember === member.email ? "0 2px 8px rgba(0, 123, 255, 0.2)" : "none",
-                    transition: "all 0.3s ease"
+                    transition: "all 0.3s ease",
+                  }}
+                  onMouseOver={(e) => {
+                    e.currentTarget.style.boxShadow = "0 4px 12px rgba(52, 152, 219, 0.2)";
+                    e.currentTarget.style.borderColor = "#3498db";
+                  }}
+                  onMouseOut={(e) => {
+                    e.currentTarget.style.boxShadow = "0 2px 8px rgba(0,0,0,0.1)";
+                    e.currentTarget.style.borderColor = "#ecf0f1";
                   }}
                 >
-                  <p style={{ margin: "0 0 10px 0", fontWeight: "bold", color: "#333" }}>{member.email}</p>
-                  <p style={{ margin: 0, color: "#666", fontSize: 12 }}>📊 {member.task_count} task{member.task_count !== 1 ? 's' : ''}</p>
+                  <h4 style={{ margin: "0 0 15px 0", color: "#2c3e50", fontSize: 16 }}>
+                    {member.email.split('@')[0]}
+                  </h4>
+                  
+                  <div style={{ marginBottom: 15 }}>
+                    <p style={{ margin: "8px 0", fontSize: 13, color: "#666" }}>
+                      <strong>Total Tasks:</strong> <span style={{ fontSize: 18, fontWeight: "bold", color: "#3498db" }}>{member.total_tasks}</span>
+                    </p>
+                  </div>
+
+                  <div style={{ marginBottom: 15, paddingBottom: 15, borderBottom: "1px solid #ecf0f1" }}>
+                    <p style={{ margin: "0 0 8px 0", fontSize: 12, color: "#7f8c8d", fontWeight: "bold" }}>Status</p>
+                    <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                      <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+                        <span style={{ fontSize: 18, fontWeight: "bold", color: "#999" }}>
+                          {member.status_counts["To Do"] || 0}
+                        </span>
+                        <span style={{ fontSize: 10, color: "#999" }}>To Do</span>
+                      </div>
+                      <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+                        <span style={{ fontSize: 18, fontWeight: "bold", color: "#007bff" }}>
+                          {member.status_counts["In Progress"] || 0}
+                        </span>
+                        <span style={{ fontSize: 10, color: "#007bff" }}>In Progress</span>
+                      </div>
+                      <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+                        <span style={{ fontSize: 18, fontWeight: "bold", color: "#28a745" }}>
+                          {member.status_counts["Done"] || 0}
+                        </span>
+                        <span style={{ fontSize: 10, color: "#28a745" }}>Done</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <p style={{ margin: "0 0 8px 0", fontSize: 12, color: "#7f8c8d", fontWeight: "bold" }}>Priority</p>
+                    <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                      <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+                        <span style={{ fontSize: 14, fontWeight: "bold", color: "#6bcf7f" }}>
+                          {member.priority_counts["Low"] || 0}
+                        </span>
+                        <span style={{ fontSize: 10, color: "#6bcf7f" }}>Low</span>
+                      </div>
+                      <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+                        <span style={{ fontSize: 14, fontWeight: "bold", color: "#ffd93d" }}>
+                          {member.priority_counts["Medium"] || 0}
+                        </span>
+                        <span style={{ fontSize: 10, color: "#ffd93d" }}>Med</span>
+                      </div>
+                      <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+                        <span style={{ fontSize: 14, fontWeight: "bold", color: "#ff6b6b" }}>
+                          {member.priority_counts["High"] || 0}
+                        </span>
+                        <span style={{ fontSize: 10, color: "#ff6b6b" }}>High</span>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               ))}
             </div>
-          </div>
-        )}
-
-        {/* Selected Member Tasks by Date */}
-        {selectedMember && Object.keys(memberTasksByDate).length > 0 && (
-          <div style={{ marginBottom: 30 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 15 }}>
-              <h3 style={{ margin: 0 }}>📋 Tasks for {selectedMember}</h3>
-              <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
-                <input
-                  type="checkbox"
-                  checked={showOnlyToday}
-                  onChange={(e) => setShowOnlyToday(e.target.checked)}
-                  style={{ cursor: "pointer" }}
-                />
-                <span style={{ fontSize: 14, fontWeight: "bold" }}>Show only today</span>
-              </label>
+          ) : (
+            <div style={{ padding: 20, backgroundColor: "#e8f4f8", borderRadius: 8, color: "#004085" }}>
+              No tasks scheduled for today.
             </div>
-            {Object.entries(memberTasksByDate)
-              .filter(([date]) => !showOnlyToday || date === getTodayDate())
-              .sort((a, b) => new Date(b[0]).getTime() - new Date(a[0]).getTime())
-              .map(([date, tasks]: [string, TaskType[]]) => {
-                const isToday = date === getTodayDate();
-                return (
-                  <div key={date} style={{ marginBottom: 25 }}>
-                    <div style={{
-                      backgroundColor: isToday ? "#d4edda" : "#f0f0f0",
-                      padding: "12px 15px",
-                      borderRadius: 6,
-                      marginBottom: 12,
-                      borderLeft: isToday ? "5px solid #28a745" : "5px solid #ddd",
-                      fontWeight: "bold",
-                      color: isToday ? "#155724" : "#666"
-                    }}>
-                      {isToday ? "📅 Today - " : "📅 "}{new Date(date).toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })}
+          )}
+        </div>
+
+        <div style={{ marginBottom: 30 }}>
+          <h2 style={{ marginBottom: 15 }}>Tasks Overview</h2>
+
+          {/* Selected Member Tasks by Date */}
+          {selectedMember && Object.keys(memberTasksByDate).length > 0 && (
+            <div style={{ marginBottom: 30 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 15 }}>
+                <h3 style={{ margin: 0 }}>📋 Tasks for {selectedMember}</h3>
+                <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+                  <input
+                    type="checkbox"
+                    checked={showOnlyToday}
+                    onChange={(e) => setShowOnlyToday(e.target.checked)}
+                    style={{ cursor: "pointer" }}
+                  />
+                  <span style={{ fontSize: 14, fontWeight: "bold" }}>Show only today</span>
+                </label>
+              </div>
+              {Object.entries(memberTasksByDate)
+                .filter(([date]) => !showOnlyToday || date === getTodayDate())
+                .sort((a, b) => new Date(b[0]).getTime() - new Date(a[0]).getTime())
+                .map(([date, tasks]: [string, TaskType[]]) => {
+                  const isToday = date === getTodayDate();
+                  return (
+                    <div key={date} style={{ marginBottom: 25 }}>
+                      <div style={{
+                        backgroundColor: isToday ? "#d4edda" : "#f0f0f0",
+                        padding: "12px 15px",
+                        borderRadius: 6,
+                        marginBottom: 12,
+                        borderLeft: isToday ? "5px solid #28a745" : "5px solid #ddd",
+                        fontWeight: "bold",
+                        color: isToday ? "#155724" : "#666"
+                      }}>
+                        {isToday ? "📅 Today - " : "📅 "}{new Date(date).toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })}
+                      </div>
+                      <div style={{ paddingLeft: 15 }}>
+                        {tasks.map((task: TaskType) => (
+                          <div
+                            key={task.id}
+                            style={{
+                              padding: 15,
+                              backgroundColor: "white",
+                              marginBottom: 12,
+                              borderLeft: `5px solid ${getPriorityColor(task.priority)}`,
+                              borderRadius: 4,
+                              boxShadow: "0 1px 3px rgba(0,0,0,0.1)"
+                            }}
+                          >
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", marginBottom: 8 }}>
+                              <h5 style={{ margin: 0, flex: 1 }}>{task.title}</h5>
+                              <span
+                                style={{
+                                  backgroundColor: getStatusColor(task.status),
+                                  color: "white",
+                                  padding: "4px 12px",
+                                  borderRadius: 20,
+                                  fontSize: 11,
+                                  whiteSpace: "nowrap",
+                                  marginLeft: 10,
+                                  fontWeight: "bold"
+                                }}
+                              >
+                                {task.status}
+                              </span>
+                            </div>
+                            <p style={{ margin: "8px 0", color: "#555", fontSize: 14 }}>{task.description}</p>
+                            <div style={{ display: "flex", gap: 20, fontSize: 12, color: "#999", flexWrap: "wrap" }}>
+                              <span>
+                                <strong>Priority:</strong>{" "}
+                                <span style={{ color: getPriorityColor(task.priority), fontWeight: "bold" }}>
+                                  {task.priority}
+                                </span>
+                              </span>
+                              {task.estimated_time && (
+                                <span>
+                                  <strong>⏱️ Est. Time:</strong> {task.estimated_time}h
+                                </span>
+                              )}
+                              {task.dependencies && task.dependencies.length > 0 && (
+                                <span>
+                                  <strong>🏷️ Tagged:</strong> {task.dependencies.length} {task.dependencies.length === 1 ? "person" : "people"}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                    <div style={{ paddingLeft: 15 }}>
-                      {tasks.map((task: TaskType) => (
-                        <div
-                          key={task.id}
-                          style={{
-                            padding: 15,
-                            backgroundColor: "white",
-                            marginBottom: 12,
-                            borderLeft: `5px solid ${getPriorityColor(task.priority)}`,
-                            borderRadius: 4,
-                            boxShadow: "0 1px 3px rgba(0,0,0,0.1)"
-                          }}
-                        >
-                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", marginBottom: 8 }}>
-                            <h5 style={{ margin: 0, flex: 1 }}>{task.title}</h5>
-                            <span
-                              style={{
-                                backgroundColor: getStatusColor(task.status),
-                                color: "white",
-                                padding: "4px 12px",
-                                borderRadius: 20,
-                                fontSize: 11,
-                                whiteSpace: "nowrap",
-                                marginLeft: 10,
-                                fontWeight: "bold"
-                              }}
-                            >
-                              {task.status}
-                            </span>
-                          </div>
-                          <p style={{ margin: "8px 0", color: "#555", fontSize: 14 }}>{task.description}</p>
-                          <div style={{ display: "flex", gap: 20, fontSize: 12, color: "#999", flexWrap: "wrap" }}>
-                            <span>
-                              <strong>Priority:</strong>{" "}
-                              <span style={{ color: getPriorityColor(task.priority), fontWeight: "bold" }}>
-                                {task.priority}
-                              </span>
-                            </span>
-                            {task.estimated_time && (
-                              <span>
-                                <strong>⏱️ Est. Time:</strong> {task.estimated_time}h
-                              </span>
-                            )}
-                            {task.dependencies && task.dependencies.length > 0 && (
-                              <span>
-                                <strong>🏷️ Tagged:</strong> {task.dependencies.length} {task.dependencies.length === 1 ? "person" : "people"}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      ))}
+                  );
+                })}
+            </div>
+          )}
+
+          {selectedMember && Object.keys(memberTasksByDate).length === 0 && !loading && (
+            <div style={{ padding: 20, backgroundColor: "#e8f4f8", borderRadius: 8, color: "#004085" }}>
+              No tasks found for {selectedMember}.
+            </div>
+          )}
+
+          {teamMembers.length === 0 && !loading && (
+            <div style={{ padding: 20, backgroundColor: "#e8f4f8", borderRadius: 8, color: "#004085" }}>
+              No team members found. Approve requests or add users to see them here.
+            </div>
+          )}
+        </div>
+
+        {/* Account Creation Requests Section */}
+        <div style={{ marginBottom: 30 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 15 }}>
+            <h2>📥 Account Creation Requests</h2>
+            <button
+              onClick={fetchAccountRequests}
+              disabled={loadingRequests}
+              style={{
+                padding: "8px 16px",
+                backgroundColor: "#3498db",
+                color: "white",
+                border: "none",
+                borderRadius: 4,
+                cursor: loadingRequests ? "not-allowed" : "pointer",
+                fontSize: 12,
+                fontWeight: "500"
+              }}
+            >
+              {loadingRequests ? "Loading..." : "Refresh"}
+            </button>
+          </div>
+
+          {accountRequests.filter(req => req.status === "pending").length > 0 ? (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: 15 }}>
+              {accountRequests
+                .filter(req => req.status === "pending")
+                .map((request) => (
+                  <div
+                    key={request._id}
+                    style={{
+                      padding: 15,
+                      backgroundColor: "white",
+                      border: "2px solid #f39c12",
+                      borderRadius: 8,
+                      boxShadow: "0 2px 8px rgba(0,0,0,0.1)"
+                    }}
+                  >
+                    <div style={{ marginBottom: 12 }}>
+                      <h4 style={{ margin: "0 0 5px 0", color: "#333" }}>{request.email}</h4>
+                      <p style={{ margin: "5px 0", fontSize: 12, color: "#666" }}>
+                        📅 Requested: {new Date(request.requested_at).toLocaleDateString()}
+                      </p>
+                      <p style={{ margin: "5px 0", fontSize: 12, color: "#999" }}>
+                        Status: <strong style={{ color: "#f39c12" }}>Pending</strong>
+                      </p>
+                    </div>
+                    <div style={{ display: "flex", gap: 10 }}>
+                      <button
+                        onClick={() => handleApproveRequest(request._id, request.email)}
+                        style={{
+                          flex: 1,
+                          padding: "8px 12px",
+                          backgroundColor: "#27ae60",
+                          color: "white",
+                          border: "none",
+                          borderRadius: 4,
+                          cursor: "pointer",
+                          fontSize: 12,
+                          fontWeight: "500"
+                        }}
+                      >
+                        ✓ Approve
+                      </button>
+                      <button
+                        onClick={() => handleRejectRequest(request._id)}
+                        style={{
+                          flex: 1,
+                          padding: "8px 12px",
+                          backgroundColor: "#e74c3c",
+                          color: "white",
+                          border: "none",
+                          borderRadius: 4,
+                          cursor: "pointer",
+                          fontSize: 12,
+                          fontWeight: "500"
+                        }}
+                      >
+                        ✗ Reject
+                      </button>
                     </div>
                   </div>
-                );
-              })}
-          </div>
-        )}
-
-        {selectedMember && Object.keys(memberTasksByDate).length === 0 && !loading && (
-          <div style={{ padding: 20, backgroundColor: "#e8f4f8", borderRadius: 8, color: "#004085" }}>
-            No tasks found for {selectedMember}.
-          </div>
-        )}
-
-        {projectLoaded && teamMembers.length === 0 && !loading && (
-          <div style={{ padding: 20, backgroundColor: "#e8f4f8", borderRadius: 8, color: "#004085" }}>
-            No team members found for this project. Team members will appear here once they submit tasks.
-          </div>
-        )}
-      </div>
-
-      <div style={{ marginBottom: 30 }}>
-        <h2>Team Management</h2>
-        <div style={{ border: "1px solid #ddd", padding: 15, borderRadius: 8 }}>
-          <p>Manage your team members and their roles.</p>
-          <button style={{ padding: 10, backgroundColor: "#28a745", color: "white", border: "none", borderRadius: 4, cursor: "pointer" }}>
-            Add Team Member
-          </button>
+                ))}
+            </div>
+          ) : (
+            <div style={{ padding: 20, backgroundColor: "#e8f4f8", borderRadius: 8, color: "#004085" }}>
+              No pending account requests at this time.
+            </div>
+          )}
         </div>
       </div>
     </div>

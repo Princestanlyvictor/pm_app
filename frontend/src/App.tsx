@@ -7,11 +7,14 @@ import ProjectManagerDashboard from "./pages/ProjectManagerDashboard";
 import TeamMemberDashboard from "./pages/TeamMemberDashboard";
 import ChatPage from "./pages/ChatPage";
 import KanbanBoard from "./pages/KanbanBoard";
+import ProjectsPage from "./pages/ProjectsPage";
+import TeamMembersPage from "./pages/TeamMembersPage";
+import HourlyTaskBreakdown from "./pages/HourlyTaskBreakdown";
 
 function App() {
   const { isAuthenticated, user } = useContext(AuthContext);
   const [showLogin, setShowLogin] = useState(true);
-  const [currentPage, setCurrentPage] = useState<"dashboard" | "chat" | "kanban">("dashboard");
+  const [currentPage, setCurrentPage] = useState<"dashboard" | "chat" | "kanban" | "projects" | "team-members" | "hourly-breakdown">("dashboard");
 
   if (isAuthenticated && user) {
     if (currentPage === "chat") {
@@ -27,11 +30,30 @@ function App() {
       );
     }
 
+    if (currentPage === "projects") {
+      return <ProjectsPage onNavigateBack={() => setCurrentPage("dashboard")} />;
+    }
+
+    if (currentPage === "team-members") {
+      return <TeamMembersPage onNavigateBack={() => setCurrentPage("dashboard")} />;
+    }
+
+    if (currentPage === "hourly-breakdown") {
+      return (
+        <HourlyTaskBreakdown
+          onNavigateToTeamMemberDashboard={() => setCurrentPage("dashboard")}
+          onNavigateToProjects={() => setCurrentPage("projects")}
+        />
+      );
+    }
+
     if (user.role === "project_manager") {
       return (
         <ProjectManagerDashboard
           onNavigateToChat={() => setCurrentPage("chat")}
           onNavigateToKanban={() => setCurrentPage("kanban")}
+          onNavigateToProjects={() => setCurrentPage("projects")}
+          onNavigateToTeamMembers={() => setCurrentPage("team-members")}
         />
       );
     } else if (user.role === "team_member") {
@@ -39,6 +61,8 @@ function App() {
         <TeamMemberDashboard
           onNavigateToChat={() => setCurrentPage("chat")}
           onNavigateToKanban={() => setCurrentPage("kanban")}
+          onNavigateToProjects={() => setCurrentPage("projects")}
+          onNavigateToHourlyBreakdown={() => setCurrentPage("hourly-breakdown")}
         />
       );
     } else {

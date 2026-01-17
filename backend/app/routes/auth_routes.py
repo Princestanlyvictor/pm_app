@@ -5,7 +5,7 @@ from datetime import datetime
 from pydantic import BaseModel
 from bson import ObjectId
 
-from app.db import users
+from app.db import users, account_requests
 from app.auth import hash_password, verify_password, create_access_token
 from app.deps import get_current_user
 
@@ -20,19 +20,27 @@ class RegisterRequest(BaseModel):
 
 @router.post("/register")
 async def register(payload: RegisterRequest):
-    existing = await users.find_one({"email": payload.email})
-    if existing:
+    # Check if email already exists (either in users or requests)
+    existing_user = await users.find_one({"email": payload.email})
+    if existing_user:
         raise HTTPException(status_code=400, detail="Email already registered")
+    
+    existing_request = await account_requests.find_one({"email": payload.email, "status": "pending"})
+    if existing_request:
+        raise HTTPException(status_code=400, detail="Request already submitted, waiting for approval")
 
-    doc = {
+    # Create account request instead of directly creating user
+    request_doc = {
         "email": payload.email,
         "password_hash": hash_password(payload.password),
         "role": payload.role,
-        "created_at": datetime.utcnow()
+        "status": "pending",
+        "requested_at": datetime.utcnow(),
+        "requested_by": payload.email
     }
 
-    result = await users.insert_one(doc)
-    return {"id": str(result.inserted_id)}
+    result = await account_requests.insert_one(request_doc)
+    return {"message": "Registration request submitted. Waiting for admin approval.", "id": str(result.inserted_id)}
 
 
 @router.post("/token")
