@@ -72,7 +72,7 @@ function App() {
   }
 
   return (
-    <div style={{ padding: 40 }}>
+    <div className="auth-layout">
       {showLogin ? (
         <Login switchToRegister={() => setShowLogin(false)} />
       ) : (
