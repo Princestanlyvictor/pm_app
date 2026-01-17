@@ -1,11 +1,12 @@
 import { useState, useContext } from "react";
 import { AuthContext } from "../context/AuthContext";
+import "./Login.css";
 
-export default function Register({ switchToLogin }: any) {
+export default function Register({ switchToLogin }: { switchToLogin: () => void }) {
   const { register } = useContext(AuthContext);
+  const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [role, setRole] = useState("team_member");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -13,7 +14,8 @@ export default function Register({ switchToLogin }: any) {
     try {
       setError("");
       setLoading(true);
-      await register(email, password, role);
+      // Only team_member registration here; project manager is not selectable
+      await register(email, password, "team_member", name);
       alert("Registration successful. Please login.");
       switchToLogin();
     } catch (err: any) {
@@ -24,42 +26,52 @@ export default function Register({ switchToLogin }: any) {
   };
 
   return (
-    <div>
-      <h2>Register</h2>
+    <div className="auth-minimal">
+      <div className="auth-box">
+        <h1>Create account</h1>
+        <p className="sub">Sign up as a team member to get started.</p>
 
-      <input
-        placeholder="Email"
-        value={email}
-        onChange={(e) => setEmail(e.target.value)}
-      />
-      <br /><br />
+        <label className="field-label" htmlFor="name">Name</label>
+        <input
+          id="name"
+          className="text-input"
+          placeholder="Your name"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          autoComplete="name"
+        />
 
-      <input
-        type="password"
-        placeholder="Password"
-        value={password}
-        onChange={(e) => setPassword(e.target.value)}
-      />
-      <br /><br />
+        <label className="field-label" htmlFor="email">Email</label>
+        <input
+          id="email"
+          className="text-input"
+          placeholder="you@company.com"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          autoComplete="email"
+        />
 
-      <label htmlFor="role">Select Role:</label>
-      <br />
-      <select value={role} onChange={(e) => setRole(e.target.value)} style={{ padding: 8, marginTop: 10 }}>
-        <option value="team_member">Team Member</option>
-        <option value="project_manager">Project Manager</option>
-      </select>
-      <br /><br />
+        <label className="field-label" htmlFor="password">Password</label>
+        <input
+          id="password"
+          className="text-input"
+          type="password"
+          placeholder="••••••••"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          autoComplete="new-password"
+        />
 
-      {error && <p style={{ color: "red" }}>{error}</p>}
+        {error && <div className="error-banner">{error}</div>}
 
-      <button onClick={submit} disabled={loading}>
-        {loading ? "Registering..." : "Register"}
-      </button>
+        <button className="primary-btn" type="button" onClick={submit} disabled={loading}>
+          {loading ? "Creating account..." : "Create account"}
+        </button>
 
-      <p>
-        Already have an account?{" "}
-        <button onClick={switchToLogin}>Login</button>
-      </p>
+        <p className="helper-text">
+          Already have an account? <button className="ghost-link" type="button" onClick={switchToLogin}>Login</button>
+        </p>
+      </div>
     </div>
   );
 }

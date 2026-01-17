@@ -366,7 +366,7 @@ export default function TeamMemberDashboard({ onNavigateToChat, onNavigateToKanb
                   fontSize: 16
                 }}
               >
-                📅 Daily Schedule
+                � Daily Schedule
               </button>
             )}
             <button
@@ -381,7 +381,7 @@ export default function TeamMemberDashboard({ onNavigateToChat, onNavigateToKanb
                 fontSize: 16
               }}
             >
-              💬 Open Chat
+              � Open Chat
             </button>
             <button
               onClick={logout}

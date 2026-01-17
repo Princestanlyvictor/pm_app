@@ -3,6 +3,7 @@ from app.auth import hash_password, verify_password, create_access_token
 from fastapi.security import OAuth2PasswordRequestForm
 from datetime import datetime
 from pydantic import BaseModel
+from typing import Optional
 from bson import ObjectId
 
 from app.db import users, account_requests
@@ -13,6 +14,7 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 class RegisterRequest(BaseModel):
+    name: Optional[str] = None
     email: str
     password: str
     role: str = "user"
@@ -32,6 +34,7 @@ async def register(payload: RegisterRequest):
     # Project managers and admins are created directly without approval
     if payload.role in ["admin", "project_manager"]:
         user_doc = {
+            "name": payload.name,
             "email": payload.email,
             "password_hash": hash_password(payload.password),
             "role": payload.role,
@@ -42,6 +45,7 @@ async def register(payload: RegisterRequest):
     
     # Other roles need approval
     request_doc = {
+        "name": payload.name,
         "email": payload.email,
         "password_hash": hash_password(payload.password),
         "role": payload.role,

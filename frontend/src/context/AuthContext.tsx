@@ -38,8 +38,9 @@ export const AuthProvider = ({ children }: any) => {
     return true;
   };
 
-  const register = async (email: string, password: string, role: string = "user") => {
+  const register = async (email: string, password: string, role: string = "user", name?: string) => {
     await api.post("/auth/register", {
+      name,
       email,
       password,
       role,
