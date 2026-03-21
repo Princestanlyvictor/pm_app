@@ -5,9 +5,23 @@ from bson import ObjectId
 from typing import List, Optional
 
 from app.deps import get_current_user
-from app.db import reports, users
+from app.db import project_activities, projects, reports, users
 
 router = APIRouter(prefix="/reports", tags=["reports"])
+
+
+async def _log_task_activity(project_id: str, action: str, message: str, user: dict, metadata: Optional[dict] = None):
+    await project_activities.insert_one(
+        {
+            "project_id": project_id,
+            "action": action,
+            "message": message,
+            "actor_email": user.get("email"),
+            "actor_role": user.get("role"),
+            "metadata": metadata or {},
+            "created_at": datetime.utcnow(),
+        }
+    )
 
 
 class MOMRequest(BaseModel):
@@ -22,7 +36,9 @@ class TaskRequest(BaseModel):
     description: str
     status: str = "To Do"  # To Do, In Progress, Done
     priority: str = "Medium"  # Low, Medium, High
+    stage: Optional[str] = None
     task_date: str  # YYYY-MM-DD format
+    due_date: Optional[str] = None
     scheduled_start_time: Optional[str] = None  # Start time HH:MM format (00:00 - 23:59)
     scheduled_end_time: Optional[str] = None  # End time HH:MM format (00:00 - 23:59)
     estimated_time: Optional[int] = None  # in hours
@@ -35,6 +51,8 @@ class TaskUpdateRequest(BaseModel):
     description: Optional[str] = None
     status: Optional[str] = None
     priority: Optional[str] = None
+    stage: Optional[str] = None
+    due_date: Optional[str] = None
     estimated_time: Optional[int] = None
     dependencies: Optional[List[str]] = None
     assigned_to: Optional[List[str]] = None
@@ -62,6 +80,21 @@ async def create_mom(payload: MOMRequest, user=Depends(get_current_user)):
 
 @router.post("/task")
 async def create_task(payload: TaskRequest, user=Depends(get_current_user)):
+    try:
+        project_object_id = ObjectId(payload.project_id)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid project ID") from exc
+
+    project = await projects.find_one({"_id": project_object_id})
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    stage_value = payload.stage
+    if not stage_value:
+        default_stages = (project.get("roadmap") or {}).get("stages", [])
+        if default_stages:
+            stage_value = default_stages[0].get("name")
+
     doc = {
         "type": "TASK",
         "project_id": payload.project_id,
@@ -69,7 +102,9 @@ async def create_task(payload: TaskRequest, user=Depends(get_current_user)):
         "description": payload.description,
         "status": payload.status,
         "priority": payload.priority,
+        "stage": stage_value,
         "task_date": payload.task_date,
+        "due_date": payload.due_date or payload.task_date,
         "scheduled_start_time": payload.scheduled_start_time,  # Store start time HH:MM
         "scheduled_end_time": payload.scheduled_end_time,      # Store end time HH:MM
         "estimated_time": payload.estimated_time,
@@ -84,11 +119,29 @@ async def create_task(payload: TaskRequest, user=Depends(get_current_user)):
         "chat": []
     }
     result = await reports.insert_one(doc)
+
+    await _log_task_activity(
+        payload.project_id,
+        "task_created",
+        f"Task '{payload.title}' created",
+        user,
+        {
+            "task_id": str(result.inserted_id),
+            "status": payload.status,
+            "priority": payload.priority,
+            "stage": stage_value,
+        },
+    )
+
     return {"id": str(result.inserted_id), "status": "Task submitted"}
 
 
 @router.put("/task/{task_id}")
 async def update_task(task_id: str, payload: TaskUpdateRequest, user=Depends(get_current_user)):
+    task = await reports.find_one({"_id": ObjectId(task_id)})
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
     update_data = {}
     
     if payload.title is not None:
@@ -99,6 +152,10 @@ async def update_task(task_id: str, payload: TaskUpdateRequest, user=Depends(get
         update_data["status"] = payload.status
     if payload.priority is not None:
         update_data["priority"] = payload.priority
+    if payload.stage is not None:
+        update_data["stage"] = payload.stage
+    if payload.due_date is not None:
+        update_data["due_date"] = payload.due_date
     if payload.estimated_time is not None:
         update_data["estimated_time"] = payload.estimated_time
     if payload.dependencies is not None:
@@ -108,13 +165,15 @@ async def update_task(task_id: str, payload: TaskUpdateRequest, user=Depends(get
     
     update_data["updated_at"] = datetime.utcnow()
     
-    result = await reports.update_one(
-        {"_id": ObjectId(task_id)},
-        {"$set": update_data}
+    await reports.update_one({"_id": ObjectId(task_id)}, {"$set": update_data})
+
+    await _log_task_activity(
+        task.get("project_id"),
+        "task_updated",
+        f"Task '{task.get('title', task_id)}' updated",
+        user,
+        {"task_id": task_id, "fields": list(update_data.keys())},
     )
-    
-    if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Task not found")
     
     return {"id": task_id, "status": "Task updated"}
 
@@ -152,7 +211,9 @@ async def get_task_detail(task_id: str, user=Depends(get_current_user)):
         "description": task.get("description"),
         "status": task.get("status"),
         "priority": task.get("priority"),
+        "stage": task.get("stage"),
         "task_date": task.get("task_date"),
+        "due_date": task.get("due_date") or task.get("task_date"),
         "estimated_time": task.get("estimated_time"),
         "dependencies": task.get("dependencies", []),
         "resolved_dependencies": task.get("resolved_dependencies", []),
@@ -184,11 +245,13 @@ async def get_tasks_by_date(project_id: str, date: str, user=Depends(get_current
             "description": task.get("description"),
             "status": task.get("status"),
             "priority": task.get("priority"),
+            "stage": task.get("stage"),
             "estimated_time": task.get("estimated_time"),
             "dependencies": task.get("dependencies", []),
             "assigned_to": task.get("assigned_to", []),
             "created_by": task.get("created_by"),
             "task_date": task.get("task_date"),
+            "due_date": task.get("due_date") or task.get("task_date"),
             "created_at": task.get("created_at")
         })
     
@@ -214,11 +277,13 @@ async def get_project_tasks(project_id: str, user=Depends(get_current_user)):
             "description": task.get("description"),
             "status": task.get("status"),
             "priority": task.get("priority"),
+            "stage": task.get("stage"),
             "estimated_time": task.get("estimated_time"),
             "dependencies": task.get("dependencies", []),
             "assigned_to": task.get("assigned_to", []),
             "created_by": task.get("created_by"),
             "task_date": task.get("task_date"),
+            "due_date": task.get("due_date") or task.get("task_date"),
             "created_at": task.get("created_at")
         })
     
@@ -253,7 +318,9 @@ async def get_user_tasks(user=Depends(get_current_user)):
         "description": task.get("description"),
         "status": task.get("status"),
         "priority": task.get("priority"),
+        "stage": task.get("stage"),
         "task_date": task.get("task_date"),
+        "due_date": task.get("due_date") or task.get("task_date"),
         "estimated_time": task.get("estimated_time"),
         "dependencies": task.get("dependencies", []),
         "resolved_dependencies": task.get("resolved_dependencies", []),
@@ -277,7 +344,9 @@ async def get_all_tasks(user=Depends(get_current_user)):
         "description": task.get("description"),
         "status": task.get("status"),
         "priority": task.get("priority"),
+        "stage": task.get("stage"),
         "task_date": task.get("task_date"),
+        "due_date": task.get("due_date") or task.get("task_date"),
         "estimated_time": task.get("estimated_time"),
         "dependencies": task.get("dependencies", []),
         "resolved_dependencies": task.get("resolved_dependencies", []),
@@ -329,11 +398,13 @@ async def get_member_tasks_by_date(project_id: str, member_email: str, user=Depe
             "description": task.get("description"),
             "status": task.get("status"),
             "priority": task.get("priority"),
+            "stage": task.get("stage"),
             "estimated_time": task.get("estimated_time"),
             "dependencies": task.get("dependencies", []),
             "assigned_to": task.get("assigned_to", []),
             "created_by": task.get("created_by"),
             "task_date": task.get("task_date"),
+            "due_date": task.get("due_date") or task.get("task_date"),
             "created_at": task.get("created_at")
         })
     
@@ -359,11 +430,13 @@ async def get_member_tasks_all_projects(member_email: str, user=Depends(get_curr
             "description": task.get("description"),
             "status": task.get("status"),
             "priority": task.get("priority"),
+            "stage": task.get("stage"),
             "estimated_time": task.get("estimated_time"),
             "dependencies": task.get("dependencies", []),
             "assigned_to": task.get("assigned_to", []),
             "created_by": task.get("created_by"),
             "task_date": task.get("task_date"),
+            "due_date": task.get("due_date") or task.get("task_date"),
             "project_id": task.get("project_id"),
             "created_at": task.get("created_at")
         })
@@ -406,6 +479,7 @@ async def get_today_tasks_breakdown(user=Depends(get_current_user)):
             "title": task.get("title"),
             "status": status,
             "priority": priority,
+            "stage": task.get("stage"),
             "project_id": task.get("project_id")
         })
     
@@ -502,13 +576,23 @@ async def get_hourly_breakdown(
 @router.put("/task/{task_id}/complete")
 async def mark_task_complete(task_id: str, user=Depends(get_current_user)):
     """Mark task as completed"""
+    task = await reports.find_one({"_id": ObjectId(task_id)})
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
     result = await reports.update_one(
         {"_id": ObjectId(task_id)},
         {"$set": {"status": "Done", "updated_at": datetime.utcnow()}}
     )
-    
-    if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Task not found")
+
+    if result.modified_count > 0:
+        await _log_task_activity(
+            task.get("project_id"),
+            "task_status_changed",
+            f"Task '{task.get('title', task_id)}' marked as Done",
+            user,
+            {"task_id": task_id, "new_status": "Done"},
+        )
     
     return {"id": task_id, "status": "Task marked as completed"}
 
@@ -539,6 +623,14 @@ async def resolve_dependency(task_id: str, user=Depends(get_current_user)):
         
         if result.matched_count == 0:
             raise HTTPException(status_code=404, detail="Task not found")
+
+        await _log_task_activity(
+            task.get("project_id"),
+            "task_dependency_resolved",
+            f"Dependency resolved by {user['email']} for task '{task.get('title', task_id)}'",
+            user,
+            {"task_id": task_id},
+        )
     
     return {
         "id": task_id,

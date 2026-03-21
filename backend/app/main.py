@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.routes import auth_routes, report_routes, chat_routes, request_routes, project_routes
+from app.db import ensure_indexes
 
 app = FastAPI(title="Project Management Backend")
 
@@ -25,6 +26,11 @@ app.include_router(report_routes.router, prefix="/api")
 app.include_router(chat_routes.router, prefix="/api")
 app.include_router(request_routes.router, prefix="/api")
 app.include_router(project_routes.router, prefix="/api")
+
+
+@app.on_event("startup")
+async def startup_event():
+    await ensure_indexes()
 
 @app.get("/")
 def root():

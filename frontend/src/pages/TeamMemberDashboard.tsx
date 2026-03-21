@@ -250,56 +250,71 @@ export default function TeamMemberDashboard({ onNavigateToChat, onNavigateToKanb
 
   return (
     <div style={{ padding: 40 }}>
-      <div style={{ marginBottom: 30 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <h1>Team Member Dashboard</h1>
-          <div style={{ display: "flex", gap: 10 }}>
+      <div style={{ display: "flex", gap: 24, alignItems: "flex-start" }}>
+        <div
+          style={{
+            width: 260,
+            backgroundColor: "#f8f9fa",
+            border: "1px solid #e9ecef",
+            borderRadius: 10,
+            padding: 16
+          }}
+        >
+          <h1 style={{ marginTop: 0, marginBottom: 16, fontSize: 28 }}>Team Member Dashboard</h1>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             {onNavigateToKanban && (
               <button
                 onClick={onNavigateToKanban}
                 style={{
-                  padding: "10px 20px",
+                  width: "100%",
+                  padding: "10px 14px",
                   backgroundColor: "#6f42c1",
                   color: "white",
                   border: "none",
-                  borderRadius: 4,
+                  borderRadius: 6,
                   cursor: "pointer",
-                  fontSize: 16
+                  fontSize: 16,
+                  textAlign: "left"
                 }}
               >
                 📊 Kanban Board
               </button>
-            )}            <button
+            )}
+
+            <button
               onClick={() => setCurrentView('dependencies')}
               style={{
-                padding: "10px 20px",
+                width: "100%",
+                padding: "10px 14px",
                 backgroundColor: currentView === 'dependencies' ? "#e67e22" : "#f39c12",
                 color: "white",
                 border: "none",
-                borderRadius: 4,
+                borderRadius: 6,
                 cursor: "pointer",
                 fontSize: 16,
-                position: "relative",
-                fontWeight: currentView === 'dependencies' ? "bold" : "normal"
+                fontWeight: currentView === 'dependencies' ? "bold" : "normal",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between"
               }}
             >
-              🔔 Dependencies
+              <span>🔔 Dependencies</span>
               {getTaggedTasks().length > 0 && (
-                <span style={{
-                  position: "absolute",
-                  right: 8,
-                  top: 8,
-                  backgroundColor: "#ff6b6b",
-                  color: "white",
-                  borderRadius: "50%",
-                  width: 20,
-                  height: 20,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  fontSize: 11,
-                  fontWeight: "bold"
-                }}>
+                <span
+                  style={{
+                    backgroundColor: "#ff6b6b",
+                    color: "white",
+                    borderRadius: "50%",
+                    width: 22,
+                    height: 22,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: 11,
+                    fontWeight: "bold"
+                  }}
+                >
                   {getTaggedTasks().length}
                 </span>
               )}
@@ -308,15 +323,16 @@ export default function TeamMemberDashboard({ onNavigateToChat, onNavigateToKanb
             <button
               onClick={() => setCurrentView('dependency-status')}
               style={{
-                padding: "10px 20px",
-                marginBottom: 10,
-                backgroundColor: currentView === 'dependency-status' ? "#4a90e2" : "white",
-                color: currentView === 'dependency-status' ? "white" : "#666",
+                width: "100%",
+                padding: "10px 14px",
+                backgroundColor: currentView === 'dependency-status' ? "#4a90e2" : "#eaf2ff",
+                color: currentView === 'dependency-status' ? "white" : "#1f4f94",
                 border: "none",
-                borderRadius: 5,
+                borderRadius: 6,
                 cursor: "pointer",
                 fontSize: 16,
-                fontWeight: currentView === 'dependency-status' ? "bold" : "normal"
+                fontWeight: currentView === 'dependency-status' ? "bold" : "normal",
+                textAlign: "left"
               }}
             >
               📊 Dependency Status
@@ -326,84 +342,100 @@ export default function TeamMemberDashboard({ onNavigateToChat, onNavigateToKanb
               <button
                 onClick={onNavigateToProjects}
                 style={{
-                  padding: "10px 20px",
+                  width: "100%",
+                  padding: "10px 14px",
                   backgroundColor: "#9b59b6",
                   color: "white",
                   border: "none",
-                  borderRadius: 4,
+                  borderRadius: 6,
                   cursor: "pointer",
-                  fontSize: 16
+                  fontSize: 16,
+                  textAlign: "left"
                 }}
               >
                 📁 Projects
               </button>
             )}
+
             <button
               onClick={() => setCurrentView('home')}
               style={{
-                padding: "10px 20px",
+                width: "100%",
+                padding: "10px 14px",
                 backgroundColor: currentView === 'home' ? "#27ae60" : "#2ecc71",
                 color: "white",
                 border: "none",
-                borderRadius: 4,
+                borderRadius: 6,
                 cursor: "pointer",
                 fontSize: 16,
-                fontWeight: currentView === 'home' ? "bold" : "normal"
+                fontWeight: currentView === 'home' ? "bold" : "normal",
+                textAlign: "left"
               }}
             >
               🏠 Home
             </button>
+
             {onNavigateToHourlyBreakdown && (
               <button
                 onClick={onNavigateToHourlyBreakdown}
                 style={{
-                  padding: "10px 20px",
+                  width: "100%",
+                  padding: "10px 14px",
                   backgroundColor: "#f39c12",
                   color: "white",
                   border: "none",
-                  borderRadius: 4,
+                  borderRadius: 6,
                   cursor: "pointer",
-                  fontSize: 16
+                  fontSize: 16,
+                  textAlign: "left"
                 }}
               >
-                � Daily Schedule
+                🕒 Daily Schedule
               </button>
             )}
+
             <button
               onClick={onNavigateToChat}
               style={{
-                padding: "10px 20px",
+                width: "100%",
+                padding: "10px 14px",
                 backgroundColor: "#17a2b8",
                 color: "white",
                 border: "none",
-                borderRadius: 4,
+                borderRadius: 6,
                 cursor: "pointer",
-                fontSize: 16
+                fontSize: 16,
+                textAlign: "left"
               }}
             >
-              � Open Chat
+              💬 Open Chat
             </button>
+
             <button
               onClick={logout}
               style={{
-                padding: "10px 20px",
+                width: "100%",
+                padding: "10px 14px",
                 backgroundColor: "#ff6b6b",
                 color: "white",
                 border: "none",
-                borderRadius: 4,
-                cursor: "pointer"
+                borderRadius: 6,
+                cursor: "pointer",
+                fontSize: 16,
+                textAlign: "left"
               }}
             >
               Logout
             </button>
           </div>
         </div>
-        <div style={{ backgroundColor: "#f0f0f0", padding: 20, borderRadius: 8, marginTop: 20 }}>
+
+        <div style={{ flex: 1 }}>
+          <div style={{ backgroundColor: "#f0f0f0", padding: 20, borderRadius: 8, marginBottom: 30 }}>
           <h2>Account Information</h2>
           <p><strong>Email:</strong> {user?.email}</p>
           <p><strong>Role:</strong> {user?.role}</p>
         </div>
-      </div>
 
       {/* Home View */}
       {currentView === 'home' && (
@@ -677,139 +709,143 @@ export default function TeamMemberDashboard({ onNavigateToChat, onNavigateToKanb
         </>
       )}
 
-      {/* Dependencies View */}
-      {currentView === 'dependencies' && (
+      {/* Dependencies & Dependency Status Views */}
+      {(currentView === 'dependencies' || currentView === 'dependency-status') && (
         <div>
-          <h1 style={{ marginBottom: 20 }}>🔔 Dependencies - Tasks You're Tagged In</h1>
-          
-          {getTaggedTasks().length === 0 ? (
-            <div style={{ textAlign: "center", padding: 60, backgroundColor: "#f9f9f9", borderRadius: 8 }}>
-              <p style={{ fontSize: 18, color: "#999", margin: 0 }}>✨ No tasks requiring your attention</p>
-              <p style={{ fontSize: 14, color: "#999", marginTop: 10 }}>You'll see tasks here when someone tags you</p>
-            </div>
-          ) : (
+          {currentView === 'dependencies' && (
             <>
-              <div style={{ marginBottom: 20, padding: 15, backgroundColor: "#fff3cd", border: "2px solid #ffc107", borderRadius: 8 }}>
-                <h3 style={{ marginTop: 0, color: "#856404" }}>
-                  You have been tagged in {getTaggedTasks().length} task{getTaggedTasks().length !== 1 ? 's' : ''}
-                </h3>
-                <p style={{ color: "#856404", margin: 0, fontSize: 14 }}>
-                  These tasks require your attention. Click on any task to view details.
-                </p>
-              </div>
-
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(350px, 1fr))", gap: 20 }}>
-                {getTaggedTasks().map((task: TaskType) => (
-                  <div
-                    key={task.id}
-                    onClick={() => setSelectedTaskId(task.id)}
-                    style={{
-                      padding: 20,
-                      backgroundColor: "white",
-                      borderLeft: `5px solid ${getPriorityColor(task.priority)}`,
-                      borderRadius: 8,
-                      cursor: "pointer",
-                      boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
-                      transition: "all 0.3s ease"
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.boxShadow = "0 4px 12px rgba(0,0,0,0.15)";
-                      e.currentTarget.style.transform = "translateY(-2px)";
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.boxShadow = "0 2px 4px rgba(0,0,0,0.1)";
-                      e.currentTarget.style.transform = "translateY(0)";
-                    }}
-                  >
-                    <h3 style={{ margin: "0 0 10px 0", fontSize: 18, color: "#333" }}>{task.title}</h3>
-                    <p style={{ margin: "0 0 15px 0", color: "#666", fontSize: 14, lineHeight: 1.5 }}>
-                      {task.description || "No description provided"}
+              <h1 style={{ marginBottom: 20 }}>🔔 Dependencies - Tasks You're Tagged In</h1>
+              
+              {getTaggedTasks().length === 0 ? (
+                <div style={{ textAlign: "center", padding: 60, backgroundColor: "#f9f9f9", borderRadius: 8 }}>
+                  <p style={{ fontSize: 18, color: "#999", margin: 0 }}>✨ No tasks requiring your attention</p>
+                  <p style={{ fontSize: 14, color: "#999", marginTop: 10 }}>You'll see tasks here when someone tags you</p>
+                </div>
+              ) : (
+                <>
+                  <div style={{ marginBottom: 20, padding: 15, backgroundColor: "#fff3cd", border: "2px solid #ffc107", borderRadius: 8 }}>
+                    <h3 style={{ marginTop: 0, color: "#856404" }}>
+                      You have been tagged in {getTaggedTasks().length} task{getTaggedTasks().length !== 1 ? 's' : ''}
+                    </h3>
+                    <p style={{ color: "#856404", margin: 0, fontSize: 14 }}>
+                      These tasks require your attention. Click on any task to view details.
                     </p>
-                    
-                    <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
-                      <span style={{
-                        backgroundColor: getPriorityColor(task.priority),
-                        color: "white",
-                        padding: "4px 12px",
-                        borderRadius: 12,
-                        fontSize: 12,
-                        fontWeight: "bold"
-                      }}>
-                        {task.priority} Priority
-                      </span>
-                      <span style={{
-                        backgroundColor: getStatusColor(task.status),
-                        color: "white",
-                        padding: "4px 12px",
-                        borderRadius: 12,
-                        fontSize: 12,
-                        fontWeight: "bold"
-                      }}>
-                        {task.status}
-                      </span>
-                    </div>
-
-                    <div style={{ fontSize: 13, color: "#666", borderTop: "1px solid #eee", paddingTop: 12 }}>
-                      <div style={{ marginBottom: 6 }}>
-                        <strong>Created by:</strong> {task.created_by}
-                      </div>
-                      <div style={{ marginBottom: 6 }}>
-                        <strong>Due Date:</strong> {new Date(task.task_date).toLocaleDateString('en-US', { 
-                          weekday: 'short', 
-                          year: 'numeric', 
-                          month: 'short', 
-                          day: 'numeric' 
-                        })}
-                      </div>
-                      {task.estimated_time && (
-                        <div>
-                          <strong>Estimated Time:</strong> {task.estimated_time} hours
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Resolve Button */}
-                    {task.resolved_dependencies?.includes(user?.email || "") ? (
-                      <div style={{
-                        marginTop: 12,
-                        padding: "8px 12px",
-                        backgroundColor: "#d4edda",
-                        color: "#155724",
-                        borderRadius: 6,
-                        fontSize: 13,
-                        fontWeight: "bold",
-                        textAlign: "center"
-                      }}>
-                        ✓ You've marked this as resolved
-                      </div>
-                    ) : (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleResolveDependency(task.id);
-                        }}
-                        style={{
-                          marginTop: 12,
-                          width: "100%",
-                          padding: "10px",
-                          backgroundColor: "#28a745",
-                          color: "white",
-                          border: "none",
-                          borderRadius: 6,
-                          cursor: "pointer",
-                          fontSize: 14,
-                          fontWeight: "bold",
-                          transition: "background-color 0.2s"
-                        }}
-                        onMouseEnter={(e) => e.currentTarget.style.backgroundColor = "#218838"}
-                        onMouseLeave={(e) => e.currentTarget.style.backgroundColor = "#28a745"}
-                      >
-                        ✓ Mark as Resolved
-                      </button>
-                    )}
                   </div>
-                ))}
-              </div>
+
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(350px, 1fr))", gap: 20 }}>
+                    {getTaggedTasks().map((task: TaskType) => (
+                      <div
+                        key={task.id}
+                        onClick={() => setSelectedTaskId(task.id)}
+                        style={{
+                          padding: 20,
+                          backgroundColor: "white",
+                          borderLeft: `5px solid ${getPriorityColor(task.priority)}`,
+                          borderRadius: 8,
+                          cursor: "pointer",
+                          boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
+                          transition: "all 0.3s ease"
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.boxShadow = "0 4px 12px rgba(0,0,0,0.15)";
+                          e.currentTarget.style.transform = "translateY(-2px)";
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.boxShadow = "0 2px 4px rgba(0,0,0,0.1)";
+                          e.currentTarget.style.transform = "translateY(0)";
+                        }}
+                      >
+                        <h3 style={{ margin: "0 0 10px 0", fontSize: 18, color: "#333" }}>{task.title}</h3>
+                        <p style={{ margin: "0 0 15px 0", color: "#666", fontSize: 14, lineHeight: 1.5 }}>
+                          {task.description || "No description provided"}
+                        </p>
+                        
+                        <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+                          <span style={{
+                            backgroundColor: getPriorityColor(task.priority),
+                            color: "white",
+                            padding: "4px 12px",
+                            borderRadius: 12,
+                            fontSize: 12,
+                            fontWeight: "bold"
+                          }}>
+                            {task.priority} Priority
+                          </span>
+                          <span style={{
+                            backgroundColor: getStatusColor(task.status),
+                            color: "white",
+                            padding: "4px 12px",
+                            borderRadius: 12,
+                            fontSize: 12,
+                            fontWeight: "bold"
+                          }}>
+                            {task.status}
+                          </span>
+                        </div>
+
+                        <div style={{ fontSize: 13, color: "#666", borderTop: "1px solid #eee", paddingTop: 12 }}>
+                          <div style={{ marginBottom: 6 }}>
+                            <strong>Created by:</strong> {task.created_by}
+                          </div>
+                          <div style={{ marginBottom: 6 }}>
+                            <strong>Due Date:</strong> {new Date(task.task_date).toLocaleDateString('en-US', { 
+                              weekday: 'short', 
+                              year: 'numeric', 
+                              month: 'short', 
+                              day: 'numeric' 
+                            })}
+                          </div>
+                          {task.estimated_time && (
+                            <div>
+                              <strong>Estimated Time:</strong> {task.estimated_time} hours
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Resolve Button */}
+                        {task.resolved_dependencies?.includes(user?.email || "") ? (
+                          <div style={{
+                            marginTop: 12,
+                            padding: "8px 12px",
+                            backgroundColor: "#d4edda",
+                            color: "#155724",
+                            borderRadius: 6,
+                            fontSize: 13,
+                            fontWeight: "bold",
+                            textAlign: "center"
+                          }}>
+                            ✓ You've marked this as resolved
+                          </div>
+                        ) : (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleResolveDependency(task.id);
+                            }}
+                            style={{
+                              marginTop: 12,
+                              width: "100%",
+                              padding: "10px",
+                              backgroundColor: "#28a745",
+                              color: "white",
+                              border: "none",
+                              borderRadius: 6,
+                              cursor: "pointer",
+                              fontSize: 14,
+                              fontWeight: "bold",
+                              transition: "background-color 0.2s"
+                            }}
+                            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = "#218838"}
+                            onMouseLeave={(e) => e.currentTarget.style.backgroundColor = "#28a745"}
+                          >
+                            ✓ Mark as Resolved
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
             </>
           )}
 
@@ -823,8 +859,9 @@ export default function TeamMemberDashboard({ onNavigateToChat, onNavigateToKanb
 
               {(() => {
                 // Get tasks created by current user that have dependencies
-                const tasksWithDependencies = tasks.filter(
-                  task => task.dependencies && task.dependencies.length > 0
+                const allTasks = Object.values(tasksByDate).flat();
+                const tasksWithDependencies = allTasks.filter(
+                  (task: TaskType) => task.dependencies && task.dependencies.length > 0
                 );
 
                 if (tasksWithDependencies.length === 0) {
@@ -850,7 +887,7 @@ export default function TeamMemberDashboard({ onNavigateToChat, onNavigateToKanb
                     gridTemplateColumns: "repeat(auto-fill, minmax(350px, 1fr))", 
                     gap: 20 
                   }}>
-                    {tasksWithDependencies.map((task) => {
+                    {tasksWithDependencies.map((task: TaskType) => {
                       const resolvedCount = task.resolved_dependencies?.length || 0;
                       const totalCount = task.dependencies?.length || 0;
                       const allResolved = resolvedCount === totalCount;
@@ -921,7 +958,7 @@ export default function TeamMemberDashboard({ onNavigateToChat, onNavigateToKanb
                             }}>
                               Tagged Team Members:
                             </div>
-                            {task.dependencies?.map((email) => {
+                            {task.dependencies?.map((email: string) => {
                               const isResolved = task.resolved_dependencies?.includes(email);
                               return (
                                 <div
@@ -964,13 +1001,13 @@ export default function TeamMemberDashboard({ onNavigateToChat, onNavigateToKanb
                             })}
                           </div>
 
-                          {task.due_date && (
+                          {task.task_date && (
                             <div style={{ 
                               marginTop: 12, 
                               fontSize: 12, 
                               color: "#666" 
                             }}>
-                              <strong>Due:</strong> {new Date(task.due_date).toLocaleDateString()}
+                              <strong>Date:</strong> {new Date(task.task_date).toLocaleDateString()}
                             </div>
                           )}
                         </div>
@@ -983,6 +1020,9 @@ export default function TeamMemberDashboard({ onNavigateToChat, onNavigateToKanb
           )}
         </div>
       )}
+
+        </div>
+      </div>
 
       {selectedTaskId && (
         <TaskDetail

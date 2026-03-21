@@ -1,5 +1,6 @@
 import { useContext, useState } from "react";
 import { AuthContext } from "./context/AuthContext";
+import "./App.css";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 import Dashboard from "./pages/Dashboard";
@@ -73,11 +74,41 @@ function App() {
 
   return (
     <div className="auth-layout">
-      {showLogin ? (
-        <Login switchToRegister={() => setShowLogin(false)} />
-      ) : (
-        <Register switchToLogin={() => setShowLogin(true)} />
-      )}
+      <div className="auth-shell">
+        <aside className="auth-sidebar">
+          <h1>PM Workspace</h1>
+          <p>Modern SaaS authentication for Admin and User access with secure onboarding.</p>
+
+          <div className="auth-sidebar-nav">
+            <button
+              className={`auth-sidebar-item ${showLogin ? "active" : ""}`}
+              type="button"
+              onClick={() => setShowLogin(true)}
+            >
+              <span>🔐</span>
+              <span>Sign in</span>
+            </button>
+            <button
+              className={`auth-sidebar-item ${!showLogin ? "active" : ""}`}
+              type="button"
+              onClick={() => setShowLogin(false)}
+            >
+              <span>👤</span>
+              <span>Create account</span>
+            </button>
+          </div>
+
+          <small>Clean · Professional · Enterprise</small>
+        </aside>
+
+        <section className="auth-main-panel">
+          {showLogin ? (
+            <Login switchToRegister={() => setShowLogin(false)} />
+          ) : (
+            <Register switchToLogin={() => setShowLogin(true)} />
+          )}
+        </section>
+      </div>
     </div>
   );
 }

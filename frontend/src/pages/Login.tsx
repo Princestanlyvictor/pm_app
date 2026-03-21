@@ -14,8 +14,9 @@ export default function Login({ switchToRegister }: { switchToRegister: () => vo
       setError("");
       setLoading(true);
       await login(email, password);
-    } catch (err: any) {
-      setError(err.response?.data?.detail || "Login failed");
+    } catch (err: unknown) {
+      const error = err as { response?: { data?: { detail?: string } } };
+      setError(error.response?.data?.detail || "Login failed");
     } finally {
       setLoading(false);
     }
@@ -24,8 +25,14 @@ export default function Login({ switchToRegister }: { switchToRegister: () => vo
   return (
     <div className="auth-minimal">
       <div className="auth-box">
-        <h1>Sign in</h1>
-        <p className="sub">Use your email and password to continue.</p>
+        <div className="auth-logo">P</div>
+        <p className="eyebrow">Secure Access</p>
+        <h1>Welcome back</h1>
+        <p className="sub">Sign in to continue to your dashboard workspace.</p>
+        <div className="auth-role-tags">
+          <span>Admin</span>
+          <span>User</span>
+        </div>
 
         <label className="field-label" htmlFor="email">Email</label>
         <input
