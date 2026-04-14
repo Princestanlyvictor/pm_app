@@ -89,7 +89,7 @@ export default function ProjectOverviewTab({ workspace, loading, onRefresh }: Pr
                 <div key={`${activity.created_at}-${index}`} style={{ borderBottom: "1px solid #F1F2F7", paddingBottom: 8 }}>
                   <div style={{ fontWeight: 600 }}>{activity.message}</div>
                   <div style={{ fontSize: 12, color: "#6B7280" }}>
-                    {activity.actor_email} • {new Date(activity.created_at).toLocaleString()}
+                    {activity.actor_email} - {new Date(activity.created_at).toLocaleString()}
                   </div>
                 </div>
               ))}

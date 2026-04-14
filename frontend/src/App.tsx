@@ -12,23 +12,13 @@ import KanbanBoard from "./pages/KanbanBoard";
 import ProjectsPage from "./pages/ProjectsPage";
 import TeamMembersPage from "./pages/TeamMembersPage";
 import TaskManagement from "./pages/TaskManagement";
-import AppHeader from "./components/AppHeader";
 
 function App() {
-  const { isAuthenticated, user } = useContext(AuthContext);
+  const { isAuthenticated, user, logout } = useContext(AuthContext);
   const [showLogin, setShowLogin] = useState(true);
-  const [currentPage, setCurrentPage] = useState<"dashboard" | "chat" | "kanban" | "projects" | "team-members" | "hourly-breakdown">("dashboard");
+  const [currentPage, setCurrentPage] = useState<"dashboard" | "chat" | "kanban" | "projects" | "team-members" | "hourly-breakdown" | "tm-dependencies" | "tm-overall-tasks">("dashboard");
   const isAdmin = user?.role === "admin" || user?.role === "project_manager";
   const isTeamMember = user?.role === "team_member" || user?.role === "user" || user?.role === "member";
-  const pageTitles: Record<string, string> = {
-    dashboard: "Dashboard",
-    chat: "Chat",
-    kanban: "Kanban",
-    projects: "Projects",
-    "team-members": "Team Members",
-    "hourly-breakdown": "Task Management",
-  };
-
   if (isAuthenticated && user) {
     let currentView: ReactElement;
 
@@ -50,6 +40,7 @@ function App() {
         <TaskManagement
           onNavigateToTeamMemberDashboard={() => setCurrentPage("dashboard")}
           onNavigateToProjects={() => setCurrentPage("projects")}
+          onNavigateToKanban={() => setCurrentPage("kanban")}
         />
       );
     } else if (isAdmin) {
@@ -62,8 +53,17 @@ function App() {
         />
       );
     } else if (isTeamMember) {
+      const teamMemberInitialView =
+        currentPage === "tm-dependencies"
+          ? "dependencies"
+          : currentPage === "tm-overall-tasks"
+            ? "overall-tasks"
+            : "home";
+
       currentView = (
         <TeamMemberDashboard
+          showSidebar={false}
+          initialView={teamMemberInitialView}
           onNavigateToChat={() => setCurrentPage("chat")}
           onNavigateToKanban={() => setCurrentPage("kanban")}
           onNavigateToProjects={() => setCurrentPage("projects")}
@@ -75,14 +75,30 @@ function App() {
     }
 
     return (
-      <div style={{ minHeight: "100vh", backgroundColor: "#F5F6FA" }}>
-        <AppHeader
-          user={user}
-          pageTitle={pageTitles[currentPage] || "Workspace"}
-          showDashboardButton={currentPage !== "dashboard"}
-          onGoDashboard={() => setCurrentPage("dashboard")}
-        />
-        <main>{currentView}</main>
+      <div className="app-auth-shell">
+        <aside className="app-auth-sidebar">
+          <div className="app-auth-brand">PM Workspace</div>
+          <nav className="app-auth-nav">
+            <button className={`app-auth-nav-item ${currentPage === "dashboard" ? "active" : ""}`} onClick={() => setCurrentPage("dashboard")}>Dashboard</button>
+            {isTeamMember && (
+              <button className={`app-auth-nav-item ${currentPage === "hourly-breakdown" ? "active" : ""}`} onClick={() => setCurrentPage("hourly-breakdown")}>Task Management</button>
+            )}
+            {isTeamMember && (
+              <button className={`app-auth-nav-item ${currentPage === "tm-overall-tasks" ? "active" : ""}`} onClick={() => setCurrentPage("tm-overall-tasks")}>Overall Tasks</button>
+            )}
+            <button className={`app-auth-nav-item ${currentPage === "projects" ? "active" : ""}`} onClick={() => setCurrentPage("projects")}>Projects</button>
+            {isTeamMember && (
+              <button className={`app-auth-nav-item ${currentPage === "tm-dependencies" ? "active" : ""}`} onClick={() => setCurrentPage("tm-dependencies")}>Dependencies</button>
+            )}
+            <button className={`app-auth-nav-item ${currentPage === "chat" ? "active" : ""}`} onClick={() => setCurrentPage("chat")}>Chat</button>
+            {isAdmin && (
+              <button className={`app-auth-nav-item ${currentPage === "team-members" ? "active" : ""}`} onClick={() => setCurrentPage("team-members")}>Team Members</button>
+            )}
+          </nav>
+          <button className="app-auth-logout" onClick={logout}>Logout</button>
+        </aside>
+
+        <main className="app-auth-main">{currentView}</main>
       </div>
     );
   }
@@ -100,7 +116,7 @@ function App() {
               type="button"
               onClick={() => setShowLogin(true)}
             >
-              <span>🔐</span>
+              <span></span>
               <span>Sign in</span>
             </button>
             <button
@@ -108,12 +124,12 @@ function App() {
               type="button"
               onClick={() => setShowLogin(false)}
             >
-              <span>👤</span>
+              <span></span>
               <span>Create account</span>
             </button>
           </div>
 
-          <small>Clean · Professional · Enterprise</small>
+          <small>Clean - Professional - Enterprise</small>
         </aside>
 
         <section className="auth-main-panel">

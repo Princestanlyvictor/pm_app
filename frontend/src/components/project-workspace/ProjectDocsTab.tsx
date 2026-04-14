@@ -59,7 +59,7 @@ export default function ProjectDocsTab({ docs, loading, canEdit, onRefresh, onCr
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
           <h4 style={{ margin: 0 }}>Project Docs</h4>
           <button type="button" onClick={onRefresh} style={{ border: "none", borderRadius: 6, padding: "6px 8px", cursor: "pointer" }}>
-            ↻
+            Refresh
           </button>
         </div>
 

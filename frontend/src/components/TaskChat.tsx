@@ -59,7 +59,7 @@ export default function TaskChat({ taskId, token, currentEmail }: TaskChatProps)
 
   return (
     <div style={{ backgroundColor: "#f5f5f5", borderRadius: 8, padding: 20 }}>
-      <h4 style={{ marginTop: 0 }}>💬 Team Chat</h4>
+      <h4 style={{ marginTop: 0 }}> Team Chat</h4>
 
       <div
         style={{

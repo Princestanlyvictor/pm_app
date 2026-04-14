@@ -64,7 +64,7 @@ export default function TeamMembersPage({ onNavigateBack }: TeamMembersPageProps
     <div style={{ minHeight: "100vh", backgroundColor: "#f5f5f5", padding: 40 }}>
       {/* Header */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 30 }}>
-        <h1 style={{ margin: 0 }}>👥 Team Members Management</h1>
+        <h1 style={{ margin: 0 }}> Team Members Management</h1>
         <button
           onClick={onNavigateBack}
           style={{
@@ -78,7 +78,7 @@ export default function TeamMembersPage({ onNavigateBack }: TeamMembersPageProps
             fontWeight: "500"
           }}
         >
-          ← Back to Dashboard
+          Back Back to Dashboard
         </button>
       </div>
 
@@ -110,7 +110,7 @@ export default function TeamMembersPage({ onNavigateBack }: TeamMembersPageProps
               fontWeight: "500"
             }}
           >
-            {loading ? "Loading..." : "🔄 Refresh"}
+            {loading ? "Loading..." : "Refresh Refresh"}
           </button>
         </div>
 
@@ -186,7 +186,7 @@ export default function TeamMembersPage({ onNavigateBack }: TeamMembersPageProps
           </div>
         ) : (
           <div style={{ textAlign: "center", padding: 60, color: "#999" }}>
-            <p style={{ fontSize: 18, marginBottom: 10 }}>👥 No team members yet</p>
+            <p style={{ fontSize: 18, marginBottom: 10 }}> No team members yet</p>
             <p style={{ fontSize: 14 }}>
               Team members will appear here once account requests are approved
             </p>

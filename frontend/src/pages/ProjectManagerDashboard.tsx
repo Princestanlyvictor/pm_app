@@ -306,7 +306,7 @@ export default function ProjectManagerDashboard({ onNavigateToChat, onNavigateTo
         boxShadow: "2px 0 8px rgba(0,0,0,0.1)"
       }}>
         <div style={{ marginBottom: 30 }}>
-          <h2 style={{ margin: "0 0 10px 0", fontSize: 20, color: "#3498db" }}>📊 PM Dashboard</h2>
+          <h2 style={{ margin: "0 0 10px 0", fontSize: 20, color: "#3498db" }}> PM Dashboard</h2>
           <div style={{ fontSize: 12, color: "#bdc3c7", marginTop: 15 }}>
             <p style={{ margin: "8px 0" }}><strong>User:</strong></p>
             <p style={{ margin: "5px 0", wordBreak: "break-all" }}>{user?.email}</p>
@@ -335,7 +335,7 @@ export default function ProjectManagerDashboard({ onNavigateToChat, onNavigateTo
             onMouseOver={(e) => (e.currentTarget.style.backgroundColor = "#d35400")}
             onMouseOut={(e) => (e.currentTarget.style.backgroundColor = "#e67e22")}
           >
-            👥 Team Members
+             Team Members
           </button>
         </div>
 
@@ -360,7 +360,7 @@ export default function ProjectManagerDashboard({ onNavigateToChat, onNavigateTo
             onMouseOver={(e) => (e.currentTarget.style.backgroundColor = "#8e44ad")}
             onMouseOut={(e) => (e.currentTarget.style.backgroundColor = "#9b59b6")}
           >
-            📁 Projects
+             Projects
           </button>
           <button
             onClick={onNavigateToKanban}
@@ -381,7 +381,7 @@ export default function ProjectManagerDashboard({ onNavigateToChat, onNavigateTo
             onMouseOver={(e) => (e.currentTarget.style.backgroundColor = "#2980b9")}
             onMouseOut={(e) => (e.currentTarget.style.backgroundColor = "#3498db")}
           >
-            📊 Kanban Board
+             Kanban Board
           </button>
           <button
             onClick={onNavigateToChat}
@@ -402,7 +402,7 @@ export default function ProjectManagerDashboard({ onNavigateToChat, onNavigateTo
             onMouseOver={(e) => (e.currentTarget.style.backgroundColor = "#27ae60")}
             onMouseOut={(e) => (e.currentTarget.style.backgroundColor = "#2ecc71")}
           >
-            💬 Team Chat
+             Team Chat
           </button>
         </div>
 
@@ -427,7 +427,7 @@ export default function ProjectManagerDashboard({ onNavigateToChat, onNavigateTo
             onMouseOver={(e) => (e.currentTarget.style.backgroundColor = "#c0392b")}
             onMouseOut={(e) => (e.currentTarget.style.backgroundColor = "#e74c3c")}
           >
-            🚪 Logout
+             Logout
           </button>
         </div>
       </div>
@@ -439,7 +439,7 @@ export default function ProjectManagerDashboard({ onNavigateToChat, onNavigateTo
         {/* Home Section - Today's Task Breakdown */}
         <div style={{ marginBottom: 40 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-            <h2 style={{ marginTop: 0 }}>📅 Today's Task Breakdown</h2>
+            <h2 style={{ marginTop: 0 }}> Today's Task Breakdown</h2>
             <button
               onClick={fetchTodayBreakdown}
               disabled={loadingToday}
@@ -553,7 +553,7 @@ export default function ProjectManagerDashboard({ onNavigateToChat, onNavigateTo
 
         <div style={{ marginBottom: 40 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-            <h2 style={{ margin: 0 }}>🕒 Daily Plan vs Actual</h2>
+            <h2 style={{ margin: 0 }}> Daily Plan vs Actual</h2>
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
               <input
                 type="date"
@@ -642,7 +642,7 @@ export default function ProjectManagerDashboard({ onNavigateToChat, onNavigateTo
                         borderLeft: `4px solid ${entry.type === "gap" ? "#cfd8dc" : "#3498db"}`
                       }}>
                         <strong>{entry.from} - {entry.to}</strong>
-                        {entry.type === "gap" ? " • Free slot" : ` • ${entry.task_title}${entry.sub_task ? ` (${entry.sub_task})` : ""}`}
+                        {entry.type === "gap" ? " - Free slot" : ` - ${entry.task_title}${entry.sub_task ? ` (${entry.sub_task})` : ""}`}
                       </div>
                     ))
                   )}
@@ -663,7 +663,7 @@ export default function ProjectManagerDashboard({ onNavigateToChat, onNavigateTo
           {selectedMember && Object.keys(memberTasksByDate).length > 0 && (
             <div style={{ marginBottom: 30 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 15 }}>
-                <h3 style={{ margin: 0 }}>📋 Tasks for {selectedMember}</h3>
+                <h3 style={{ margin: 0 }}> Tasks for {selectedMember}</h3>
                 <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
                   <input
                     type="checkbox"
@@ -690,7 +690,7 @@ export default function ProjectManagerDashboard({ onNavigateToChat, onNavigateTo
                         fontWeight: "bold",
                         color: isToday ? "#155724" : "#666"
                       }}>
-                        {isToday ? "📅 Today - " : "📅 "}{new Date(date).toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })}
+                        {isToday ? " Today - " : " "}{new Date(date).toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })}
                       </div>
                       <div style={{ paddingLeft: 15 }}>
                         {tasks.map((task: TaskType) => (
@@ -732,12 +732,12 @@ export default function ProjectManagerDashboard({ onNavigateToChat, onNavigateTo
                               </span>
                               {task.estimated_time && (
                                 <span>
-                                  <strong>⏱️ Est. Time:</strong> {task.estimated_time}h
+                                  <strong>Est. Time:</strong> {task.estimated_time}h
                                 </span>
                               )}
                               {task.dependencies && task.dependencies.length > 0 && (
                                 <span>
-                                  <strong>🏷️ Tagged:</strong> {task.dependencies.length} {task.dependencies.length === 1 ? "person" : "people"}
+                                  <strong>Tagged:</strong> {task.dependencies.length} {task.dependencies.length === 1 ? "person" : "people"}
                                 </span>
                               )}
                             </div>
@@ -766,7 +766,7 @@ export default function ProjectManagerDashboard({ onNavigateToChat, onNavigateTo
         {/* Account Creation Requests Section */}
         <div style={{ marginBottom: 30 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 15 }}>
-            <h2>📥 Account Creation Requests</h2>
+            <h2> Account Creation Requests</h2>
             <button
               onClick={fetchAccountRequests}
               disabled={loadingRequests}
@@ -803,7 +803,7 @@ export default function ProjectManagerDashboard({ onNavigateToChat, onNavigateTo
                     <div style={{ marginBottom: 12 }}>
                       <h4 style={{ margin: "0 0 5px 0", color: "#333" }}>{request.email}</h4>
                       <p style={{ margin: "5px 0", fontSize: 12, color: "#666" }}>
-                        📅 Requested: {new Date(request.requested_at).toLocaleDateString()}
+                         Requested: {new Date(request.requested_at).toLocaleDateString()}
                       </p>
                       <p style={{ margin: "5px 0", fontSize: 12, color: "#999" }}>
                         Status: <strong style={{ color: "#f39c12" }}>Pending</strong>
@@ -824,7 +824,7 @@ export default function ProjectManagerDashboard({ onNavigateToChat, onNavigateTo
                           fontWeight: "500"
                         }}
                       >
-                        ✓ Approve
+                         Approve
                       </button>
                       <button
                         onClick={() => handleRejectRequest(request._id)}
@@ -840,7 +840,7 @@ export default function ProjectManagerDashboard({ onNavigateToChat, onNavigateTo
                           fontWeight: "500"
                         }}
                       >
-                        ✗ Reject
+                        X Reject
                       </button>
                     </div>
                   </div>

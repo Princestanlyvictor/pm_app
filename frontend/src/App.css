@@ -24,6 +24,67 @@ body {
   min-height: 100vh;
 }
 
+.app-auth-shell {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  background: var(--saas-bg);
+}
+
+.app-auth-sidebar {
+  border-right: 1px solid #e5e7eb;
+  background: #ffffff;
+  padding: 14px 12px;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-auth-brand {
+  font-size: 18px;
+  font-weight: 700;
+  color: #111827;
+  margin-bottom: 14px;
+}
+
+.app-auth-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+}
+
+.app-auth-nav-item {
+  border: none;
+  background: transparent;
+  border-radius: 8px;
+  color: #4b5563;
+  text-align: left;
+  font-size: 14px;
+  padding: 9px 10px;
+  cursor: pointer;
+}
+
+.app-auth-nav-item.active {
+  background: #e5e7eb;
+  color: #111827;
+  font-weight: 600;
+}
+
+.app-auth-logout {
+  border: 1px solid #e5e7eb;
+  background: #ffffff;
+  color: #374151;
+  border-radius: 8px;
+  font-size: 13px;
+  padding: 8px 10px;
+  cursor: pointer;
+}
+
+.app-auth-main {
+  min-height: 100vh;
+  overflow: auto;
+}
+
 .auth-layout {
   min-height: 100vh;
   display: flex;
@@ -111,6 +172,21 @@ body {
 }
 
 @media (max-width: 960px) {
+  .app-auth-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .app-auth-sidebar {
+    border-right: none;
+    border-bottom: 1px solid #e5e7eb;
+  }
+
+  .app-auth-nav {
+    flex-direction: row;
+    flex-wrap: wrap;
+    margin-bottom: 8px;
+  }
+
   .auth-shell {
     grid-template-columns: 1fr;
     min-height: auto;

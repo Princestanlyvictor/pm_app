@@ -2,8 +2,11 @@ import { useContext, useState, useEffect } from "react";
 import { AuthContext } from "../context/AuthContext";
 import api from "../services/api";
 import TaskDetail from "../components/TaskDetail";
+import "./TeamMemberDashboard.css";
 
 interface TeamMemberDashboardProps {
+  showSidebar?: boolean;
+  initialView?: 'home' | 'dependencies' | 'overall-tasks';
   onNavigateToChat: () => void;
   onNavigateToKanban?: () => void;
   onNavigateToProjects?: () => void;
@@ -31,6 +34,9 @@ interface TaskType {
   status: string;
   priority: string;
   task_date: string;
+  project_id?: string;
+  scheduled_start_time?: string;
+  scheduled_end_time?: string;
   estimated_time?: number;
   dependencies: string[];
   resolved_dependencies?: string[];
@@ -38,9 +44,9 @@ interface TaskType {
   created_at: string;
 }
 
-export default function TeamMemberDashboard({ onNavigateToChat, onNavigateToKanban, onNavigateToProjects, onNavigateToHourlyBreakdown }: TeamMemberDashboardProps) {
+export default function TeamMemberDashboard({ showSidebar = true, initialView = 'home', onNavigateToChat, onNavigateToKanban, onNavigateToProjects, onNavigateToHourlyBreakdown }: TeamMemberDashboardProps) {
   const { user, logout, token } = useContext(AuthContext);
-  const [currentView, setCurrentView] = useState<'home' | 'dependencies' | 'dependency-status'>('home');
+  const [currentView, setCurrentView] = useState<'home' | 'dependencies' | 'overall-tasks'>(initialView);
   const [showTaskForm, setShowTaskForm] = useState(false);
   const [showMOMForm, setShowMOMForm] = useState(false);
   const [tasksByDate, setTasksByDate] = useState<Record<string, TaskType[]>>({});
@@ -73,6 +79,9 @@ export default function TeamMemberDashboard({ onNavigateToChat, onNavigateToKanb
   const [taskError, setTaskError] = useState("");
   const [momError, setMOMError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
+  const [historyPage, setHistoryPage] = useState(1);
+  const [historyDateFilter, setHistoryDateFilter] = useState("");
+  const [selectedHistoryDate, setSelectedHistoryDate] = useState<string | null>(null);
 
   useEffect(() => {
     if (token && user?.email) {
@@ -82,6 +91,10 @@ export default function TeamMemberDashboard({ onNavigateToChat, onNavigateToKanb
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, user?.email]);
+
+  useEffect(() => {
+    setCurrentView(initialView);
+  }, [initialView]);
 
 
 
@@ -237,354 +250,132 @@ export default function TeamMemberDashboard({ onNavigateToChat, onNavigateToKanb
   };
 
   const todayKey = new Date().toISOString().split('T')[0];
-  const allTasks = Object.values(tasksByDate).flat();
   const todayTasks = tasksByDate[todayKey] || [];
   const completedTodayCount = todayTasks.filter((task) => task.status === "Done").length;
-  const inProgressTodayCount = todayTasks.filter((task) => task.status === "In Progress").length;
-  const toDoTodayCount = todayTasks.filter((task) => task.status === "To Do").length;
-  const openHighPriorityCount = allTasks.filter(
-    (task) => (task.priority === "High" || task.priority === "Critical") && task.status !== "Done"
-  ).length;
-  const recentTasks = [...allTasks]
-    .sort((a, b) => {
-      const dateA = new Date(a.created_at || a.task_date).getTime();
-      const dateB = new Date(b.created_at || b.task_date).getTime();
-      return dateB - dateA;
+  const pendingTodayCount = todayTasks.filter((task) => task.status !== "Done").length;
+  const plannedTodayHours = todayTasks.reduce((sum, task) => sum + Number(task.estimated_time || 0), 0);
+  const todayLabel = new Date().toLocaleDateString("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+  const rowsPerPage = 10;
+
+  const historySummaryRows = Object.entries(tasksByDate)
+    .map(([date, tasks]) => {
+      const total = tasks.length;
+      const completed = tasks.filter((task) => task.status === "Done").length;
+      const pending = total - completed;
+      const completion = total ? Math.round((completed / total) * 100) : 0;
+      return { date, total, completed, pending, completion };
     })
-    .slice(0, 5);
+    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+  const filteredHistoryRows = historyDateFilter
+    ? historySummaryRows.filter((row) => row.date === historyDateFilter)
+    : historySummaryRows;
+
+  const totalHistoryPages = Math.max(1, Math.ceil(filteredHistoryRows.length / rowsPerPage));
+  const paginatedHistoryRows = filteredHistoryRows.slice((historyPage - 1) * rowsPerPage, historyPage * rowsPerPage);
+
+  const selectedDateTasks = selectedHistoryDate ? tasksByDate[selectedHistoryDate] || [] : [];
+
+  const projectNameById = projects.reduce<Record<string, string>>((acc, project) => {
+    acc[project.id] = project.name;
+    return acc;
+  }, {});
+
+  const resolveProjectName = (task: TaskType) => {
+    if (!task.project_id) return "-";
+    return projectNameById[task.project_id] || task.project_id;
+  };
+
+  const formatTimeRange = (task: TaskType) => {
+    if (!task.scheduled_start_time && !task.scheduled_end_time) return "-";
+    const start = task.scheduled_start_time || "--:--";
+    const end = task.scheduled_end_time || "--:--";
+    return `${start} - ${end}`;
+  };
+
+  const statusClassName = (status: string) => {
+    if (status === "Done") return "tm-status-done";
+    if (status === "In Progress") return "tm-status-progress";
+    return "tm-status-todo";
+  };
 
   return (
-    <div style={{ padding: 40 }}>
-      <div style={{ display: "flex", gap: 24, alignItems: "flex-start" }}>
-        <div
-          style={{
-            width: 260,
-            backgroundColor: "#f8f9fa",
-            border: "1px solid #e9ecef",
-            borderRadius: 10,
-            padding: 16
-          }}
-        >
-          <h1 style={{ marginTop: 0, marginBottom: 16, fontSize: 28 }}>Team Member Dashboard</h1>
-
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+    <div className={`tm-dashboard ${showSidebar ? "" : "tm-no-sidebar"}`}>
+      {showSidebar && (
+        <aside className="tm-sidebar">
+          <div className="tm-brand">PM</div>
+          <nav className="tm-nav">
+            <button className={`tm-nav-item ${currentView === 'home' ? 'active' : ''}`} onClick={() => setCurrentView('home')}>
+              Dashboard
+            </button>
+            <button className={`tm-nav-item ${currentView === 'dependencies' ? 'active' : ''}`} onClick={() => setCurrentView('dependencies')}>
+              Dependencies {getTaggedTasks().length > 0 ? `(${getTaggedTasks().length})` : ''}
+            </button>
+            <button className={`tm-nav-item ${currentView === 'overall-tasks' ? 'active' : ''}`} onClick={() => setCurrentView('overall-tasks')}>
+              Overall Tasks
+            </button>
             {onNavigateToKanban && (
-              <button
-                onClick={onNavigateToKanban}
-                style={{
-                  width: "100%",
-                  padding: "10px 14px",
-                  backgroundColor: "#6f42c1",
-                  color: "white",
-                  border: "none",
-                  borderRadius: 6,
-                  cursor: "pointer",
-                  fontSize: 16,
-                  textAlign: "left"
-                }}
-              >
-                📊 Kanban Board
-              </button>
+              <button className="tm-nav-item" onClick={onNavigateToKanban}>Kanban</button>
             )}
-
-            <button
-              onClick={() => setCurrentView('dependencies')}
-              style={{
-                width: "100%",
-                padding: "10px 14px",
-                backgroundColor: currentView === 'dependencies' ? "#e67e22" : "#f39c12",
-                color: "white",
-                border: "none",
-                borderRadius: 6,
-                cursor: "pointer",
-                fontSize: 16,
-                fontWeight: currentView === 'dependencies' ? "bold" : "normal",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between"
-              }}
-            >
-              <span>🔔 Dependencies</span>
-              {getTaggedTasks().length > 0 && (
-                <span
-                  style={{
-                    backgroundColor: "#ff6b6b",
-                    color: "white",
-                    borderRadius: "50%",
-                    width: 22,
-                    height: 22,
-                    display: "inline-flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    fontSize: 11,
-                    fontWeight: "bold"
-                  }}
-                >
-                  {getTaggedTasks().length}
-                </span>
-              )}
-            </button>
-
-            <button
-              onClick={() => setCurrentView('dependency-status')}
-              style={{
-                width: "100%",
-                padding: "10px 14px",
-                backgroundColor: currentView === 'dependency-status' ? "#4a90e2" : "#eaf2ff",
-                color: currentView === 'dependency-status' ? "white" : "#1f4f94",
-                border: "none",
-                borderRadius: 6,
-                cursor: "pointer",
-                fontSize: 16,
-                fontWeight: currentView === 'dependency-status' ? "bold" : "normal",
-                textAlign: "left"
-              }}
-            >
-              📊 Dependency Status
-            </button>
-
             {onNavigateToProjects && (
-              <button
-                onClick={onNavigateToProjects}
-                style={{
-                  width: "100%",
-                  padding: "10px 14px",
-                  backgroundColor: "#9b59b6",
-                  color: "white",
-                  border: "none",
-                  borderRadius: 6,
-                  cursor: "pointer",
-                  fontSize: 16,
-                  textAlign: "left"
-                }}
-              >
-                📁 Projects
-              </button>
+              <button className="tm-nav-item" onClick={onNavigateToProjects}>Projects</button>
             )}
-
-            <button
-              onClick={() => setCurrentView('home')}
-              style={{
-                width: "100%",
-                padding: "10px 14px",
-                backgroundColor: currentView === 'home' ? "#27ae60" : "#2ecc71",
-                color: "white",
-                border: "none",
-                borderRadius: 6,
-                cursor: "pointer",
-                fontSize: 16,
-                fontWeight: currentView === 'home' ? "bold" : "normal",
-                textAlign: "left"
-              }}
-            >
-              🏠 Home
-            </button>
-
             {onNavigateToHourlyBreakdown && (
-              <button
-                onClick={onNavigateToHourlyBreakdown}
-                style={{
-                  width: "100%",
-                  padding: "10px 14px",
-                  backgroundColor: "#f39c12",
-                  color: "white",
-                  border: "none",
-                  borderRadius: 6,
-                  cursor: "pointer",
-                  fontSize: 16,
-                  textAlign: "left"
-                }}
-              >
-                🕒 Daily Schedule
-              </button>
+              <button className="tm-nav-item" onClick={onNavigateToHourlyBreakdown}>Daily Schedule</button>
             )}
+            <button className="tm-nav-item" onClick={onNavigateToChat}>Chat</button>
+            
+          </nav>
+        </aside>
+      )}
 
-            <button
-              onClick={onNavigateToChat}
-              style={{
-                width: "100%",
-                padding: "10px 14px",
-                backgroundColor: "#17a2b8",
-                color: "white",
-                border: "none",
-                borderRadius: 6,
-                cursor: "pointer",
-                fontSize: 16,
-                textAlign: "left"
-              }}
-            >
-              💬 Open Chat
-            </button>
-
-            <button
-              onClick={logout}
-              style={{
-                width: "100%",
-                padding: "10px 14px",
-                backgroundColor: "#ff6b6b",
-                color: "white",
-                border: "none",
-                borderRadius: 6,
-                cursor: "pointer",
-                fontSize: 16,
-                textAlign: "left"
-              }}
-            >
-              Logout
-            </button>
+      <main className="tm-main">
+        <header className="tm-topbar">
+          <div className="tm-userline">
+            <span>{user?.email?.split("@")[0] || "Team Member"}</span>
+            <span className="tm-sep">/</span>
+            <span>Team Member</span>
+            <span className="tm-sep">|</span>
+            <span>{todayLabel}</span>
           </div>
-        </div>
+          <button className="tm-logout" onClick={logout}>LOGOUT</button>
+        </header>
 
-        <div style={{ flex: 1 }}>
+        {successMessage && <div className="tm-success">{successMessage}</div>}
+        {taskError && <div className="tm-error">{taskError}</div>}
+        {momError && <div className="tm-error">{momError}</div>}
 
-      {/* Home View */}
-      {currentView === 'home' && (
-        <>
-          {successMessage && (
-            <div style={{ backgroundColor: "#d4edda", color: "#155724", padding: 15, borderRadius: 4, marginBottom: 20 }}>
-              {successMessage}
-            </div>
-          )}
-
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
-            <button
-              onClick={() => setShowTaskForm(!showTaskForm)}
-              style={{
-                padding: "10px 16px",
-                backgroundColor: showTaskForm ? "#9ca3af" : "#1f6feb",
-                color: "white",
-                border: "none",
-                borderRadius: 8,
-                cursor: "pointer",
-                fontWeight: 600
-              }}
-            >
-              {showTaskForm ? "Hide Task Form" : "+ Add Daily Task"}
-            </button>
-            <button
-              onClick={() => setShowMOMForm(!showMOMForm)}
-              style={{
-                padding: "10px 16px",
-                backgroundColor: showMOMForm ? "#94a3b8" : "#0f9fb8",
-                color: "white",
-                border: "none",
-                borderRadius: 8,
-                cursor: "pointer",
-                fontWeight: 600
-              }}
-            >
-              {showMOMForm ? "Hide MOM Form" : "+ Submit MOM"}
-            </button>
-          </div>
-
-          <div
-            style={{
-              background: "linear-gradient(125deg, #f4f9ff 0%, #edf7f3 55%, #fff7ec 100%)",
-              border: "1px solid #dbe6f2",
-              borderRadius: 16,
-              padding: 20,
-              marginBottom: 22
-            }}
-          >
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap", marginBottom: 16 }}>
-              <div>
-                <h2 style={{ margin: 0, color: "#102a43", fontSize: 30, letterSpacing: 0.2 }}>Team Member Workspace</h2>
-                <p style={{ margin: "6px 0 0", color: "#486581", fontSize: 14 }}>
-                  Track daily delivery, resolve dependencies faster, and keep momentum visible.
-                </p>
-              </div>
-              <div style={{ padding: "8px 12px", backgroundColor: "#ffffffb3", border: "1px solid #d9e7f2", borderRadius: 999, color: "#334e68", fontSize: 13, fontWeight: 600 }}>
-                {user?.email}
-              </div>
-            </div>
-
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12, marginBottom: 16 }}>
-              <div style={{ backgroundColor: "#ffffff", border: "1px solid #e6edf5", borderRadius: 12, padding: 14 }}>
-                <div style={{ color: "#627d98", fontSize: 13 }}>Today&apos;s Tasks</div>
-                <div style={{ color: "#102a43", fontSize: 28, fontWeight: 700, marginTop: 4 }}>{todayTasks.length}</div>
-              </div>
-              <div style={{ backgroundColor: "#ffffff", border: "1px solid #e6edf5", borderRadius: 12, padding: 14 }}>
-                <div style={{ color: "#627d98", fontSize: 13 }}>In Progress</div>
-                <div style={{ color: "#1769aa", fontSize: 28, fontWeight: 700, marginTop: 4 }}>{inProgressTodayCount}</div>
-              </div>
-              <div style={{ backgroundColor: "#ffffff", border: "1px solid #e6edf5", borderRadius: 12, padding: 14 }}>
-                <div style={{ color: "#627d98", fontSize: 13 }}>Completed Today</div>
-                <div style={{ color: "#2f855a", fontSize: 28, fontWeight: 700, marginTop: 4 }}>{completedTodayCount}</div>
-              </div>
-              <div style={{ backgroundColor: "#ffffff", border: "1px solid #e6edf5", borderRadius: 12, padding: 14 }}>
-                <div style={{ color: "#627d98", fontSize: 13 }}>High Priority Open</div>
-                <div style={{ color: "#b42318", fontSize: 28, fontWeight: 700, marginTop: 4 }}>{openHighPriorityCount}</div>
-              </div>
-            </div>
-
-            <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 12 }}>
-              <div style={{ backgroundColor: "#ffffff", border: "1px solid #e6edf5", borderRadius: 12, padding: 14 }}>
-                <h3 style={{ margin: "0 0 10px", color: "#102a43", fontSize: 18 }}>Recent Activity</h3>
-                {recentTasks.length === 0 ? (
-                  <p style={{ margin: 0, color: "#829ab1", fontSize: 14 }}>No task activity yet. Start by creating your first daily task.</p>
-                ) : (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                    {recentTasks.map((task) => (
-                      <button
-                        key={task.id}
-                        onClick={() => setSelectedTaskId(task.id)}
-                        style={{
-                          backgroundColor: "#f8fbff",
-                          border: "1px solid #dce9f5",
-                          borderRadius: 10,
-                          padding: "10px 12px",
-                          textAlign: "left",
-                          cursor: "pointer"
-                        }}
-                      >
-                        <div style={{ color: "#102a43", fontWeight: 600, fontSize: 14 }}>{task.title}</div>
-                        <div style={{ color: "#627d98", fontSize: 12, marginTop: 4 }}>
-                          {task.status} • {task.priority} • {new Date(task.task_date).toLocaleDateString()}
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <div style={{ backgroundColor: "#ffffff", border: "1px solid #e6edf5", borderRadius: 12, padding: 14 }}>
-                <h3 style={{ margin: "0 0 10px", color: "#102a43", fontSize: 18 }}>Quick Actions</h3>
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  <button
-                    onClick={() => setShowTaskForm(true)}
-                    style={{ backgroundColor: "#1f6feb", color: "white", border: "none", borderRadius: 9, padding: "10px 12px", cursor: "pointer", fontWeight: 600, textAlign: "left" }}
-                  >
-                    + New Daily Task
-                  </button>
-                  <button
-                    onClick={() => setCurrentView('dependencies')}
-                    style={{ backgroundColor: "#fef3c7", color: "#92400e", border: "1px solid #fde68a", borderRadius: 9, padding: "10px 12px", cursor: "pointer", fontWeight: 600, textAlign: "left" }}
-                  >
-                    Review Dependencies ({getTaggedTasks().length})
-                  </button>
-                  <button
-                    onClick={() => setCurrentView('dependency-status')}
-                    style={{ backgroundColor: "#eff6ff", color: "#1e40af", border: "1px solid #bfdbfe", borderRadius: 9, padding: "10px 12px", cursor: "pointer", fontWeight: 600, textAlign: "left" }}
-                  >
-                    Check Dependency Status
-                  </button>
-                  <button
-                    onClick={() => setShowMOMForm(true)}
-                    style={{ backgroundColor: "#ecfdf3", color: "#027a48", border: "1px solid #a6f4c5", borderRadius: 9, padding: "10px 12px", cursor: "pointer", fontWeight: 600, textAlign: "left" }}
-                  >
-                    Submit MOM Notes
-                  </button>
+        {currentView === 'home' && (
+          <>
+            <section className="tm-overview">
+              <h2>DAILY OVERVIEW</h2>
+              <div className="tm-stats-grid">
+                <div className="tm-stat-card">
+                  <p>TODAY&apos;S TASKS</p>
+                  <strong>{todayTasks.length}</strong>
                 </div>
-                <p style={{ margin: "10px 0 0", fontSize: 12, color: "#829ab1" }}>
-                  To-Do today: {toDoTodayCount}
-                </p>
+                <div className="tm-stat-card">
+                  <p>COMPLETED</p>
+                  <strong className="ok">{completedTodayCount}</strong>
+                </div>
+                <div className="tm-stat-card">
+                  <p>PENDING</p>
+                  <strong className="warn">{pendingTodayCount}</strong>
+                </div>
+                <div className="tm-stat-card">
+                  <p>PLANNED TIME</p>
+                  <strong>{plannedTodayHours.toFixed(1)} hrs</strong>
+                </div>
               </div>
-            </div>
-          </div>
+            </section>
 
-          <div style={{ marginBottom: 30 }}>
-        {showTaskForm && (
-          <div style={{ marginBottom: 22 }}>
+            {showTaskForm && (
+              <div className="tm-form-wrap">
+                <div style={{ marginBottom: 22 }}>
             <div style={{ color: "#667085", fontSize: 14, marginBottom: 8 }}>Dashboard &gt; Tasks &gt; Create</div>
             <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap", marginBottom: 14 }}>
               <div>
@@ -733,9 +524,55 @@ export default function TeamMemberDashboard({ onNavigateToChat, onNavigateToKanb
               {taskError && <p style={{ color: "#dc2626", marginTop: 12, marginBottom: 0 }}>{taskError}</p>}
             </div>
           </div>
-        )}
+              </div>
+            )}
 
-        <div>
+            {showMOMForm && (
+              <div className="tm-form-wrap" style={{ marginTop: 16 }}>
+                <div style={{ border: "1px solid #ddd", padding: 20, borderRadius: 8, marginBottom: 0, backgroundColor: "#f9f9f9" }}>
+                  <h3>Submit Minutes of Meeting</h3>
+                  <select
+                    value={momForm.project_id}
+                    onChange={(e) => setMOMForm({ ...momForm, project_id: e.target.value })}
+                    style={{ width: "100%", padding: 8, marginBottom: 10, borderRadius: 4, border: "1px solid #ddd" }}
+                  >
+                    <option value="">-- Select Project --</option>
+                    {projects.length > 0 ? (
+                      projects.map((project) => (
+                        <option key={project.id} value={project.id}>
+                          {project.name}
+                        </option>
+                      ))
+                    ) : (
+                      <option disabled>No projects available</option>
+                    )}
+                  </select>
+                  <input
+                    type="date"
+                    value={momForm.date}
+                    onChange={(e) => setMOMForm({ ...momForm, date: e.target.value })}
+                    style={{ width: "100%", padding: 8, marginBottom: 10, borderRadius: 4, border: "1px solid #ddd" }}
+                  />
+                  <textarea
+                    placeholder="Meeting notes and points discussed..."
+                    value={momForm.content}
+                    onChange={(e) => setMOMForm({ ...momForm, content: e.target.value })}
+                    style={{ width: "100%", padding: 8, marginBottom: 10, borderRadius: 4, border: "1px solid #ddd", minHeight: 120 }}
+                  />
+                  <button
+                    onClick={handleMOMSubmit}
+                    disabled={loading}
+                    style={{ padding: 10, backgroundColor: "#28a745", color: "white", border: "none", borderRadius: 4, cursor: "pointer" }}
+                  >
+                    {loading ? "Submitting..." : "Submit MOM"}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <section className="tm-task-list-wrap">
+              <h3>Today&apos;s Task List</h3>
+              <div>
           {Object.entries(tasksByDate).length === 0 ? (
             <div style={{ border: "1px solid #ddd", padding: 15, borderRadius: 8, backgroundColor: "#f9f9f9" }}>
               <p>No tasks submitted yet.</p>
@@ -746,7 +583,7 @@ export default function TeamMemberDashboard({ onNavigateToChat, onNavigateToKanb
               .map(([date, tasks]: [string, TaskType[]]) => (
                 <div key={date} style={{ marginBottom: 25 }}>
                   <h4 style={{ color: "#007bff", borderBottom: "2px solid #007bff", paddingBottom: 10 }}>
-                    📆 {new Date(date).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+                     {new Date(date).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
                   </h4>
                   <div>
                     {tasks.length === 0 ? (
@@ -787,15 +624,15 @@ export default function TeamMemberDashboard({ onNavigateToChat, onNavigateToKanb
                           </div>
                           <p style={{ margin: "8px 0", color: "#555", fontSize: 14 }}>{task.description}</p>
                           <div style={{ display: "flex", gap: 20, fontSize: 12, color: "#999", flexWrap: "wrap" }}>
-                            <span>⏱️ <strong>Est:</strong> {task.estimated_time ? `${task.estimated_time}h` : "N/A"}</span>
+                            <span><strong>Est:</strong> {task.estimated_time ? `${task.estimated_time}h` : "N/A"}</span>
                             <span>
-                              🎯 <strong>Priority:</strong>{" "}
+                               <strong>Priority:</strong>{" "}
                               <span style={{ color: getPriorityColor(task.priority), fontWeight: "bold" }}>
                                 {task.priority}
                               </span>
                             </span>
                             {task.dependencies?.length > 0 && (
-                              <span>🏷️ <strong>Tagged:</strong> {task.dependencies.length} {task.dependencies.length === 1 ? "person" : "people"}</span>
+                              <span><strong>Tagged:</strong> {task.dependencies.length} {task.dependencies.length === 1 ? "person" : "people"}</span>
                             )}
                           </div>
                         </div>
@@ -805,131 +642,231 @@ export default function TeamMemberDashboard({ onNavigateToChat, onNavigateToKanb
                 </div>
               ))
           )}
-        </div>
-      </div>
-
-      <div style={{ marginBottom: 30 }}>
-
-        {showMOMForm && (
-          <div style={{ border: "1px solid #ddd", padding: 20, borderRadius: 8, marginBottom: 15, backgroundColor: "#f9f9f9" }}>
-            <h3>Submit Minutes of Meeting</h3>
-            <select
-              value={momForm.project_id}
-              onChange={(e) => setMOMForm({ ...momForm, project_id: e.target.value })}
-              style={{ width: "100%", padding: 8, marginBottom: 10, borderRadius: 4, border: "1px solid #ddd" }}
-            >
-              <option value="">-- Select Project --</option>
-              {projects.length > 0 ? (
-                projects.map((project) => (
-                  <option key={project.id} value={project.id}>
-                    {project.name}
-                  </option>
-                ))
-              ) : (
-                <option disabled>No projects available</option>
-              )}
-            </select>
-            <input
-              type="date"
-              value={momForm.date}
-              onChange={(e) => setMOMForm({ ...momForm, date: e.target.value })}
-              style={{ width: "100%", padding: 8, marginBottom: 10, borderRadius: 4, border: "1px solid #ddd" }}
-            />
-            <textarea
-              placeholder="Meeting notes and points discussed..."
-              value={momForm.content}
-              onChange={(e) => setMOMForm({ ...momForm, content: e.target.value })}
-              style={{ width: "100%", padding: 8, marginBottom: 10, borderRadius: 4, border: "1px solid #ddd", minHeight: 120 }}
-            />
-            {momError && <p style={{ color: "red", marginBottom: 10 }}>{momError}</p>}
-            <button
-              onClick={handleMOMSubmit}
-              disabled={loading}
-              style={{ padding: 10, backgroundColor: "#28a745", color: "white", border: "none", borderRadius: 4, cursor: "pointer" }}
-            >
-              {loading ? "Submitting..." : "Submit MOM"}
-            </button>
-          </div>
+              </div>
+            </section>
+          </>
         )}
-      </div>
-        </>
+
+      {currentView === 'overall-tasks' && (
+        <section className="tm-secondary-view">
+          <h2 style={{ marginBottom: 16, color: "#333" }}>Overall Tasks</h2>
+
+          {!selectedHistoryDate ? (
+            <>
+              <div className="tm-history-toolbar">
+                <label htmlFor="history-date-filter">Find by date</label>
+                <input
+                  id="history-date-filter"
+                  type="date"
+                  value={historyDateFilter}
+                  onChange={(e) => {
+                    setHistoryDateFilter(e.target.value);
+                    setHistoryPage(1);
+                  }}
+                />
+                <button
+                  type="button"
+                  className="tm-ghost-btn"
+                  onClick={() => {
+                    setHistoryDateFilter("");
+                    setHistoryPage(1);
+                  }}
+                >
+                  Clear
+                </button>
+              </div>
+
+              <div className="tm-table-wrap">
+                <table className="tm-history-table">
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Total Tasks</th>
+                      <th>Completed Tasks</th>
+                      <th>Pending Tasks</th>
+                      <th>Completion %</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {paginatedHistoryRows.length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="tm-empty-cell">No tasks available for this date</td>
+                      </tr>
+                    ) : (
+                      paginatedHistoryRows.map((row) => (
+                        <tr
+                          key={row.date}
+                          className="tm-clickable-row"
+                          onClick={() => setSelectedHistoryDate(row.date)}
+                        >
+                          <td>
+                            {row.date}
+                            {row.date === todayKey ? " (Today)" : ""}
+                          </td>
+                          <td>{row.total}</td>
+                          <td>{row.completed}</td>
+                          <td>{row.pending}</td>
+                          <td>{row.completion}%</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="tm-pagination-row">
+                <button
+                  className="tm-ghost-btn"
+                  type="button"
+                  disabled={historyPage <= 1}
+                  onClick={() => setHistoryPage((p) => Math.max(1, p - 1))}
+                >
+                  Previous
+                </button>
+                <span>
+                  Page {historyPage} of {totalHistoryPages}
+                </span>
+                <button
+                  className="tm-ghost-btn"
+                  type="button"
+                  disabled={historyPage >= totalHistoryPages}
+                  onClick={() => setHistoryPage((p) => Math.min(totalHistoryPages, p + 1))}
+                >
+                  Next
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="tm-breadcrumb-row">
+                <button className="tm-ghost-btn" type="button" onClick={() => setSelectedHistoryDate(null)}>
+                  Overall Tasks
+                </button>
+                <span>&gt;</span>
+                <span>{selectedHistoryDate}</span>
+              </div>
+
+              <div className="tm-table-wrap">
+                <table className="tm-history-table tm-detail-table">
+                  <thead>
+                    <tr>
+                      <th>Member Name</th>
+                      <th>Task Title</th>
+                      <th>Project</th>
+                      <th>Description</th>
+                      <th>Time (Start-End)</th>
+                      <th>Estimated Time</th>
+                      <th>Status</th>
+                      <th>Priority</th>
+                      <th>Blockers</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {selectedDateTasks.length === 0 ? (
+                      <tr>
+                        <td colSpan={9} className="tm-empty-cell">No tasks available for this date</td>
+                      </tr>
+                    ) : (
+                      selectedDateTasks.map((task) => (
+                        <tr key={task.id}>
+                          <td>{user?.email?.split("@")[0] || "Team Member"}</td>
+                          <td title={task.title} className="tm-truncate-cell">{task.title}</td>
+                          <td title={resolveProjectName(task)} className="tm-truncate-cell">{resolveProjectName(task)}</td>
+                          <td title={task.description || "-"} className="tm-truncate-cell">{task.description || "-"}</td>
+                          <td>{formatTimeRange(task)}</td>
+                          <td>{task.estimated_time ? `${task.estimated_time}h` : "-"}</td>
+                          <td>
+                            <span className={`tm-status-pill ${statusClassName(task.status)}`}>{task.status}</span>
+                          </td>
+                          <td>{task.priority}</td>
+                          <td title={task.dependencies?.length ? task.dependencies.join(", ") : "-"} className="tm-truncate-cell">
+                            {task.dependencies?.length ? task.dependencies.join(", ") : "-"}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+        </section>
       )}
 
-      {/* Dependencies & Dependency Status Views */}
-      {(currentView === 'dependencies' || currentView === 'dependency-status') && (
-        <div>
-          {currentView === 'dependencies' && (
-            <>
-              <h1 style={{ marginBottom: 20 }}>🔔 Dependencies - Tasks You're Tagged In</h1>
+      {/* Combined Dependencies View */}
+      {currentView === 'dependencies' && (
+        <div className="tm-secondary-view">
+          <>
+            <h1 style={{ marginBottom: 20 }}> Dependencies - Tasks You&apos;re Tagged In</h1>
               
-              {getTaggedTasks().length === 0 ? (
-                <div style={{ textAlign: "center", padding: 60, backgroundColor: "#f9f9f9", borderRadius: 8 }}>
-                  <p style={{ fontSize: 18, color: "#999", margin: 0 }}>✨ No tasks requiring your attention</p>
-                  <p style={{ fontSize: 14, color: "#999", marginTop: 10 }}>You'll see tasks here when someone tags you</p>
+            {getTaggedTasks().length === 0 ? (
+              <div style={{ textAlign: "center", padding: 60, backgroundColor: "#f9f9f9", borderRadius: 8 }}>
+                <p style={{ fontSize: 18, color: "#999", margin: 0 }}> No tasks requiring your attention</p>
+                <p style={{ fontSize: 14, color: "#999", marginTop: 10 }}>You&apos;ll see tasks here when someone tags you</p>
+              </div>
+            ) : (
+              <>
+                <div style={{ marginBottom: 20, padding: 15, backgroundColor: "#fff3cd", border: "2px solid #ffc107", borderRadius: 8 }}>
+                  <h3 style={{ marginTop: 0, color: "#856404" }}>
+                    You have been tagged in {getTaggedTasks().length} task{getTaggedTasks().length !== 1 ? 's' : ''}
+                  </h3>
+                  <p style={{ color: "#856404", margin: 0, fontSize: 14 }}>
+                    These tasks require your attention. Click on any task to view details.
+                  </p>
                 </div>
-              ) : (
-                <>
-                  <div style={{ marginBottom: 20, padding: 15, backgroundColor: "#fff3cd", border: "2px solid #ffc107", borderRadius: 8 }}>
-                    <h3 style={{ marginTop: 0, color: "#856404" }}>
-                      You have been tagged in {getTaggedTasks().length} task{getTaggedTasks().length !== 1 ? 's' : ''}
-                    </h3>
-                    <p style={{ color: "#856404", margin: 0, fontSize: 14 }}>
-                      These tasks require your attention. Click on any task to view details.
-                    </p>
-                  </div>
 
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(350px, 1fr))", gap: 20 }}>
-                    {getTaggedTasks().map((task: TaskType) => (
-                      <div
-                        key={task.id}
-                        onClick={() => setSelectedTaskId(task.id)}
-                        style={{
-                          padding: 20,
-                          backgroundColor: "white",
-                          borderLeft: `5px solid ${getPriorityColor(task.priority)}`,
-                          borderRadius: 8,
-                          cursor: "pointer",
-                          boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
-                          transition: "all 0.3s ease"
-                        }}
-                        onMouseEnter={(e) => {
-                          e.currentTarget.style.boxShadow = "0 4px 12px rgba(0,0,0,0.15)";
-                          e.currentTarget.style.transform = "translateY(-2px)";
-                        }}
-                        onMouseLeave={(e) => {
-                          e.currentTarget.style.boxShadow = "0 2px 4px rgba(0,0,0,0.1)";
-                          e.currentTarget.style.transform = "translateY(0)";
-                        }}
-                      >
-                        <h3 style={{ margin: "0 0 10px 0", fontSize: 18, color: "#333" }}>{task.title}</h3>
-                        <p style={{ margin: "0 0 15px 0", color: "#666", fontSize: 14, lineHeight: 1.5 }}>
-                          {task.description || "No description provided"}
-                        </p>
-                        
-                        <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
-                          <span style={{
-                            backgroundColor: getPriorityColor(task.priority),
-                            color: "white",
-                            padding: "4px 12px",
-                            borderRadius: 12,
-                            fontSize: 12,
-                            fontWeight: "bold"
-                          }}>
-                            {task.priority} Priority
-                          </span>
-                          <span style={{
-                            backgroundColor: getStatusColor(task.status),
-                            color: "white",
-                            padding: "4px 12px",
-                            borderRadius: 12,
-                            fontSize: 12,
-                            fontWeight: "bold"
-                          }}>
-                            {task.status}
-                          </span>
-                        </div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(350px, 1fr))", gap: 20 }}>
+                  {getTaggedTasks().map((task: TaskType) => (
+                    <div
+                      key={task.id}
+                      onClick={() => setSelectedTaskId(task.id)}
+                      style={{
+                        padding: 20,
+                        backgroundColor: "white",
+                        borderLeft: `5px solid ${getPriorityColor(task.priority)}`,
+                        borderRadius: 8,
+                        cursor: "pointer",
+                        boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
+                        transition: "all 0.3s ease"
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.boxShadow = "0 4px 12px rgba(0,0,0,0.15)";
+                        e.currentTarget.style.transform = "translateY(-2px)";
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.boxShadow = "0 2px 4px rgba(0,0,0,0.1)";
+                        e.currentTarget.style.transform = "translateY(0)";
+                      }}
+                    >
+                      <h3 style={{ margin: "0 0 10px 0", fontSize: 18, color: "#333" }}>{task.title}</h3>
+                      <p style={{ margin: "0 0 15px 0", color: "#666", fontSize: 14, lineHeight: 1.5 }}>
+                        {task.description || "No description provided"}
+                      </p>
+                      
+                      <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+                        <span style={{
+                          backgroundColor: getPriorityColor(task.priority),
+                          color: "white",
+                          padding: "4px 12px",
+                          borderRadius: 12,
+                          fontSize: 12,
+                          fontWeight: "bold"
+                        }}>
+                          {task.priority} Priority
+                        </span>
+                        <span style={{
+                          backgroundColor: getStatusColor(task.status),
+                          color: "white",
+                          padding: "4px 12px",
+                          borderRadius: 12,
+                          fontSize: 12,
+                          fontWeight: "bold"
+                        }}>
+                          {task.status}
+                        </span>
+                      </div>
 
-                        <div style={{ fontSize: 13, color: "#666", borderTop: "1px solid #eee", paddingTop: 12 }}>
+                      <div style={{ fontSize: 13, color: "#666", borderTop: "1px solid #eee", paddingTop: 12 }}>
                           <div style={{ marginBottom: 6 }}>
                             <strong>Created by:</strong> {task.created_by}
                           </div>
@@ -946,64 +883,59 @@ export default function TeamMemberDashboard({ onNavigateToChat, onNavigateToKanb
                               <strong>Estimated Time:</strong> {task.estimated_time} hours
                             </div>
                           )}
-                        </div>
+                      </div>
 
                         {/* Resolve Button */}
-                        {task.resolved_dependencies?.includes(user?.email || "") ? (
-                          <div style={{
+                      {task.resolved_dependencies?.includes(user?.email || "") ? (
+                        <div style={{
+                          marginTop: 12,
+                          padding: "8px 12px",
+                          backgroundColor: "#d4edda",
+                          color: "#155724",
+                          borderRadius: 6,
+                          fontSize: 13,
+                          fontWeight: "bold",
+                          textAlign: "center"
+                        }}>
+                           You&apos;ve marked this as resolved
+                        </div>
+                      ) : (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleResolveDependency(task.id);
+                          }}
+                          style={{
                             marginTop: 12,
-                            padding: "8px 12px",
-                            backgroundColor: "#d4edda",
-                            color: "#155724",
+                            width: "100%",
+                            padding: "10px",
+                            backgroundColor: "#28a745",
+                            color: "white",
+                            border: "none",
                             borderRadius: 6,
-                            fontSize: 13,
+                            cursor: "pointer",
+                            fontSize: 14,
                             fontWeight: "bold",
-                            textAlign: "center"
-                          }}>
-                            ✓ You've marked this as resolved
-                          </div>
-                        ) : (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleResolveDependency(task.id);
-                            }}
-                            style={{
-                              marginTop: 12,
-                              width: "100%",
-                              padding: "10px",
-                              backgroundColor: "#28a745",
-                              color: "white",
-                              border: "none",
-                              borderRadius: 6,
-                              cursor: "pointer",
-                              fontSize: 14,
-                              fontWeight: "bold",
-                              transition: "background-color 0.2s"
-                            }}
-                            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = "#218838"}
-                            onMouseLeave={(e) => e.currentTarget.style.backgroundColor = "#28a745"}
-                          >
-                            ✓ Mark as Resolved
-                          </button>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </>
-              )}
-            </>
-          )}
+                            transition: "background-color 0.2s"
+                          }}
+                          onMouseEnter={(e) => e.currentTarget.style.backgroundColor = "#218838"}
+                          onMouseLeave={(e) => e.currentTarget.style.backgroundColor = "#28a745"}
+                        >
+                           Mark as Resolved
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
 
-          {/* Dependency Status View */}
-          {currentView === 'dependency-status' && (
-            <>
-              <h2 style={{ marginBottom: 20, color: "#333" }}>Dependency Status</h2>
-              <p style={{ color: "#666", marginBottom: 20 }}>
-                View resolution status of tasks where you've tagged team members
-              </p>
+            <h2 style={{ marginTop: 30, marginBottom: 12, color: "#333" }}>Dependency Status</h2>
+            <p style={{ color: "#666", marginBottom: 20 }}>
+              View resolution status of tasks where you&apos;ve tagged team members
+            </p>
 
-              {(() => {
+            {(() => {
                 // Get tasks created by current user that have dependencies
                 const allTasks = Object.values(tasksByDate).flat();
                 const tasksWithDependencies = allTasks.filter(
@@ -1019,9 +951,9 @@ export default function TeamMemberDashboard({ onNavigateToChat, onNavigateToKanb
                       borderRadius: 8,
                       color: "#666"
                     }}>
-                      <div style={{ fontSize: 48, marginBottom: 16 }}>📊</div>
+                      <div style={{ fontSize: 48, marginBottom: 16 }}></div>
                       <div style={{ fontSize: 16 }}>
-                        You haven't created any tasks with dependencies yet
+                        You haven&apos;t created any tasks with dependencies yet
                       </div>
                     </div>
                   );
@@ -1125,7 +1057,7 @@ export default function TeamMemberDashboard({ onNavigateToChat, onNavigateToKanb
                                     fontWeight: "bold",
                                     color: isResolved ? "#28a745" : "#6c757d"
                                   }}>
-                                    {isResolved ? "✓" : "○"}
+                                    {isResolved ? "" : ""}
                                   </span>
                                   <span style={{ 
                                     color: isResolved ? "#155724" : "#666",
@@ -1161,14 +1093,12 @@ export default function TeamMemberDashboard({ onNavigateToChat, onNavigateToKanb
                     })}
                   </div>
                 );
-              })()}
-            </>
-          )}
+            })()}
+          </>
         </div>
       )}
 
-        </div>
-      </div>
+      </main>
 
       {selectedTaskId && (
         <TaskDetail

@@ -489,7 +489,7 @@ export default function ProjectsPage({ onNavigateBack }: ProjectsPageProps) {
     <div style={{ minHeight: "100vh", backgroundColor: "#F5F6FA", padding: 32 }}>
       {/* Header */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 30 }}>
-        <h1 style={{ margin: 0, color: "#0E0A3C" }}>📁 Projects Management</h1>
+        <h1 style={{ margin: 0, color: "#0E0A3C" }}> Projects Management</h1>
         <button
           onClick={onNavigateBack}
           style={{
@@ -503,7 +503,7 @@ export default function ProjectsPage({ onNavigateBack }: ProjectsPageProps) {
             fontWeight: "500"
           }}
         >
-          ← Back to Dashboard
+          Back Back to Dashboard
         </button>
       </div>
 
@@ -523,7 +523,7 @@ export default function ProjectsPage({ onNavigateBack }: ProjectsPageProps) {
               fontWeight: "500"
             }}
           >
-            {showCreateForm ? "✕ Cancel" : "+ Create New Project"}
+            {showCreateForm ? "X Cancel" : "+ Create New Project"}
           </button>
         </div>
       )}
@@ -870,7 +870,7 @@ export default function ProjectsPage({ onNavigateBack }: ProjectsPageProps) {
       ) : (
         <div style={{ backgroundColor: "white", padding: 24, borderRadius: 12, boxShadow: "0 6px 20px rgba(14,10,60,0.06)", border: "1px solid #ECEEF5", marginTop: 16 }}>
           <div style={{ textAlign: "center", padding: 60, color: "#999" }}>
-            <p style={{ fontSize: 18, marginBottom: 10 }}>📂 No projects yet</p>
+            <p style={{ fontSize: 18, marginBottom: 10 }}> No projects yet</p>
             <p style={{ fontSize: 14 }}>
               {isAdmin
                 ? "Create your first project to get started!"

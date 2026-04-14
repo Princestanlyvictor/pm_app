@@ -6,6 +6,7 @@ import "../styles/TaskManagement.css";
 interface TaskManagementProps {
   onNavigateToTeamMemberDashboard?: () => void;
   onNavigateToProjects?: () => void;
+  onNavigateToKanban?: () => void;
 }
 
 // ============================================
@@ -67,6 +68,7 @@ interface TreeTask {
 const TaskManagement: React.FC<TaskManagementProps> = ({
   onNavigateToTeamMemberDashboard,
   onNavigateToProjects,
+  onNavigateToKanban,
 }) => {
   const { token } = useContext(AuthContext);
   const [errorMessage, setErrorMessage] = useState("");
@@ -597,16 +599,21 @@ const TaskManagement: React.FC<TaskManagementProps> = ({
       {/* Header */}
       <div className="tm-header">
         <div className="tm-header-top">
-          <h1>📋 Task Management</h1>
+          <h1> Task Management</h1>
           <div className="tm-nav-buttons">
             {onNavigateToTeamMemberDashboard && (
               <button className="nav-btn secondary" onClick={onNavigateToTeamMemberDashboard}>
-                ← Back to Dashboard
+                Back Back to Dashboard
               </button>
             )}
             {onNavigateToProjects && (
               <button className="nav-btn secondary" onClick={onNavigateToProjects}>
-                📁 Projects
+                 Projects
+              </button>
+            )}
+            {onNavigateToKanban && (
+              <button className="nav-btn secondary" onClick={onNavigateToKanban}>
+                Kanban Board
               </button>
             )}
           </div>
@@ -640,7 +647,7 @@ const TaskManagement: React.FC<TaskManagementProps> = ({
                     <span className="project-selection-status">{project.status || "Active"}</span>
                   </div>
                   <p>{project.description || "No description provided."}</p>
-                  <span className="project-selection-action">Open Task Workspace →</span>
+                  <span className="project-selection-action">Open Task Workspace</span>
                 </button>
               ))}
             </div>
@@ -793,7 +800,7 @@ const TaskManagement: React.FC<TaskManagementProps> = ({
                                 );
                               }}
                             >
-                              {task.expanded ? "▼" : "▶"}
+                              {task.expanded ? "v" : ">"}
                             </button>
                           )}
                         </td>
@@ -819,7 +826,7 @@ const TaskManagement: React.FC<TaskManagementProps> = ({
                               {task.description && <div className="task-description-text">{task.description}</div>}
                               {hasSubtasks && (
                                 <div className="subtask-indicator">
-                                  {task.subtasks.length} subtask{task.subtasks.length !== 1 ? 's' : ''} • {progress}% complete
+                                  {task.subtasks.length} subtask{task.subtasks.length !== 1 ? 's' : ''} - {progress}% complete
                                 </div>
                               )}
                             </div>
@@ -956,7 +963,7 @@ const TaskManagement: React.FC<TaskManagementProps> = ({
                                   }}
                                   title="Delete Subtask"
                                 >
-                                  ✕
+                                  X
                                 </button>
                                 */}
                               </td>
@@ -985,7 +992,7 @@ const TaskManagement: React.FC<TaskManagementProps> = ({
             <section className="subtask-detail-content">
               <div className="subtask-detail-topbar">
                 <button className="nav-btn secondary" onClick={closeSubtaskDetailPanel}>
-                  ← Back to Task List
+                  Back Back to Task List
                 </button>
                 <button
                   className="nav-btn primary"
@@ -1167,7 +1174,7 @@ const TaskManagement: React.FC<TaskManagementProps> = ({
             <section className="subtask-detail-content">
               <div className="subtask-detail-topbar">
                 <button className="nav-btn secondary" onClick={closeSubtaskReadPanel}>
-                  ← Back to Subtasks
+                  Back Back to Subtasks
                 </button>
               </div>
 

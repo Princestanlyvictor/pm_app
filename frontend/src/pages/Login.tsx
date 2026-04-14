@@ -49,7 +49,7 @@ export default function Login({ switchToRegister }: { switchToRegister: () => vo
           id="password"
           className="text-input"
           type="password"
-          placeholder="••••••••"
+          placeholder="--------"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           autoComplete="current-password"

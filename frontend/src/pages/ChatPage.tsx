@@ -14,7 +14,7 @@ export default function ChatPage({ onNavigateBack }: ChatPageProps) {
   return (
     <div style={{ padding: 40, maxWidth: 1200, margin: "0 auto" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 30 }}>
-        <h1>💬 Chat</h1>
+        <h1> Chat</h1>
         <div style={{ display: "flex", gap: 10 }}>
           {onNavigateBack && (
             <button
@@ -28,7 +28,7 @@ export default function ChatPage({ onNavigateBack }: ChatPageProps) {
                 cursor: "pointer"
               }}
             >
-              ← Back to Dashboard
+              Back Back to Dashboard
             </button>
           )}
           <button
@@ -66,7 +66,7 @@ export default function ChatPage({ onNavigateBack }: ChatPageProps) {
             fontWeight: activeTab === "global" ? "bold" : "normal"
           }}
         >
-          🌐 Global Chat
+           Global Chat
         </button>
         <button
           onClick={() => setActiveTab("personal")}
@@ -80,7 +80,7 @@ export default function ChatPage({ onNavigateBack }: ChatPageProps) {
             fontWeight: activeTab === "personal" ? "bold" : "normal"
           }}
         >
-          📨 Personal Chat
+           Personal Chat
         </button>
       </div>
 

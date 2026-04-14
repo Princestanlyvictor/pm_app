@@ -20,6 +20,7 @@ interface TaskType {
   created_by: string;
   created_at: string;
   project_id: string;
+  parent_task_id?: string;
 }
 
 const STATUS_COLUMNS = ["To Do", "In Progress", "Done"];
@@ -50,6 +51,21 @@ export default function KanbanBoard({ onNavigateToChat, onNavigateBack }: Kanban
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [allTasks, projectFilter, dateFilter]);
 
+  const parseParentMarker = (description?: string) => {
+    const source = String(description || "");
+    const markerRegex = /^\s*\[\[SUBTASK_OF:([^\]]+)\]\]\s*/i;
+    const match = source.match(markerRegex);
+    return {
+      hasMarker: !!match,
+      cleanedDescription: source.replace(markerRegex, "").trim(),
+    };
+  };
+
+  const isSubtask = (task: TaskType) => {
+    if (task.parent_task_id) return true;
+    return parseParentMarker(task.description).hasMarker;
+  };
+
   const fetchTasks = async () => {
     try {
       setLoading(true);
@@ -70,10 +86,11 @@ export default function KanbanBoard({ onNavigateToChat, onNavigateBack }: Kanban
       }
 
       if (response) {
-        setAllTasks(response.data || []);
+        const subtasksOnly = (response.data || []).filter((task: TaskType) => isSubtask(task));
+        setAllTasks(subtasksOnly);
 
         // Extract unique projects
-        const projects = [...new Set((response.data || []).map((t: TaskType) => t.project_id))];
+        const projects = [...new Set(subtasksOnly.map((t: TaskType) => t.project_id))];
         setAvailableProjects(projects.filter(p => p) as string[]);
       }
     } catch (err) {
@@ -161,8 +178,8 @@ export default function KanbanBoard({ onNavigateToChat, onNavigateBack }: Kanban
       {/* Header */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 30 }}>
         <div>
-          <h1>📊 Task Kanban Board</h1>
-          <p style={{ color: "#666", marginTop: -10 }}>Drag and drop tasks to change status</p>
+          <h1> Task Kanban Board</h1>
+          <p style={{ color: "#666", marginTop: -10 }}>Drag and drop sub-tasks to change status</p>
         </div>
         <div style={{ display: "flex", gap: 10 }}>
           {onNavigateBack && (
@@ -177,7 +194,7 @@ export default function KanbanBoard({ onNavigateToChat, onNavigateBack }: Kanban
                 cursor: "pointer"
               }}
             >
-              ← Back to Dashboard
+              Back Back to Dashboard
             </button>
           )}
           {onNavigateToChat && (
@@ -192,7 +209,7 @@ export default function KanbanBoard({ onNavigateToChat, onNavigateBack }: Kanban
                 cursor: "pointer"
               }}
             >
-              💬 Chat
+               Chat
             </button>
           )}
           <button
@@ -276,7 +293,7 @@ export default function KanbanBoard({ onNavigateToChat, onNavigateBack }: Kanban
             alignSelf: "flex-end"
           }}
         >
-          {loading ? "Refreshing..." : "🔄 Refresh"}
+          {loading ? "Refreshing..." : "Refresh Refresh"}
         </button>
       </div>
 
@@ -305,7 +322,7 @@ export default function KanbanBoard({ onNavigateToChat, onNavigateBack }: Kanban
               fontSize: 16,
               color: "#333"
             }}>
-              {status === "To Do" && "📋"} {status === "In Progress" && "⚙️"} {status === "Done" && "✅"} {status}
+              {status === "To Do" && ""} {status === "In Progress" && ""} {status === "Done" && ""} {status}
               <span style={{ float: "right", fontSize: 14, color: "#666" }}>
                 ({filteredTasks[status]?.length || 0})
               </span>
@@ -327,7 +344,7 @@ export default function KanbanBoard({ onNavigateToChat, onNavigateBack }: Kanban
                   color: "#999",
                   padding: "40px 10px"
                 }}>
-                  No tasks yet. Drag tasks here or create new ones.
+                  No sub-tasks yet.
                 </div>
               ) : (
                 (filteredTasks[status] || []).map(task => (
@@ -353,7 +370,7 @@ export default function KanbanBoard({ onNavigateToChat, onNavigateBack }: Kanban
                       {task.title}
                     </h4>
                     <p style={{ margin: "0 0 8px 0", fontSize: 12, color: "#666", lineHeight: 1.4 }}>
-                      {task.description}
+                      {parseParentMarker(task.description).cleanedDescription || "No description"}
                     </p>
 
                     <div style={{
@@ -364,8 +381,8 @@ export default function KanbanBoard({ onNavigateToChat, onNavigateBack }: Kanban
                       marginBottom: 8,
                       flexWrap: "wrap"
                     }}>
-                      <span>📅 {new Date(task.task_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
-                      {task.estimated_time && <span>⏱️ {task.estimated_time}h</span>}
+                      <span> {new Date(task.task_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
+                      {task.estimated_time && <span>{task.estimated_time}h</span>}
                     </div>
 
                     {task.dependencies?.length > 0 && (

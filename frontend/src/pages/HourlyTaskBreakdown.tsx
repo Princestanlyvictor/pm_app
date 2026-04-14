@@ -163,7 +163,7 @@ const HourlyTaskBreakdown: React.FC<HourlyTaskBreakdownProps> = ({
 
   /** Prevent circular hierarchy (simplified version) */
   const canAddSubtask = (parentTaskId: string): boolean => {
-    // Max 2-level nesting: root task → subtask (no sub-subtasks)
+    // Max 2-level nesting: root task -> subtask (no sub-subtasks)
     return true; // Subtasks are always leaf nodes
   };
 
@@ -363,16 +363,16 @@ const HourlyTaskBreakdown: React.FC<HourlyTaskBreakdownProps> = ({
     <div className="hourly-task-breakdown">
       <div className="htb-header">
         <div className="htb-header-top">
-          <h1>📅 Daily Task Breakdown & Time Tracking</h1>
+          <h1> Daily Task Breakdown & Time Tracking</h1>
           <div className="htb-nav-buttons">
             {onNavigateToTeamMemberDashboard && (
               <button className="nav-btn secondary" onClick={onNavigateToTeamMemberDashboard}>
-                ← Back to Dashboard
+                Back Back to Dashboard
               </button>
             )}
             {onNavigateToProjects && (
               <button className="nav-btn secondary" onClick={onNavigateToProjects}>
-                📁 Projects
+                 Projects
               </button>
             )}
           </div>
@@ -469,7 +469,7 @@ const HourlyTaskBreakdown: React.FC<HourlyTaskBreakdownProps> = ({
       {planData?.alerts?.length ? (
         <div className="alerts-panel">
           {planData.alerts.map((alert, idx) => (
-            <div key={`${alert.type}-${idx}`} className="alert-item">⚠️ {alert.message}</div>
+            <div key={`${alert.type}-${idx}`} className="alert-item"> {alert.message}</div>
           ))}
         </div>
       ) : null}
@@ -495,7 +495,7 @@ const HourlyTaskBreakdown: React.FC<HourlyTaskBreakdownProps> = ({
                       ) : (
                         <div className="timeline-title">
                           {entry.task_title}
-                          {entry.sub_task ? ` • ${entry.sub_task}` : ""}
+                          {entry.sub_task ? ` - ${entry.sub_task}` : ""}
                           <span className="timeline-meta"> ETA {entry.estimated_minutes}m / Actual {entry.actual_minutes}m</span>
                         </div>
                       )}
@@ -522,7 +522,7 @@ const HourlyTaskBreakdown: React.FC<HourlyTaskBreakdownProps> = ({
                       <div key={block._id} className="block-row">
                         <div className="block-main">
                           <div className="block-title">{block.task_title}</div>
-                          <div className="block-sub">{block.start_time} - {block.end_time} • ETA {block.estimated_minutes}m • Status {block.status}</div>
+                          <div className="block-sub">{block.start_time} - {block.end_time} - ETA {block.estimated_minutes}m - Status {block.status}</div>
                           {block.sub_task ? <div className="block-sub">Sub-task: {block.sub_task}</div> : null}
                         </div>
 
