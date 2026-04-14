@@ -52,6 +52,55 @@ interface TodayTaskBreakdown {
   }>;
 }
 
+interface DailyPlanMemberRow {
+  user_email: string;
+  has_plan: boolean;
+  planned_minutes: number;
+  actual_minutes: number;
+  variance_minutes: number;
+  over_utilized: boolean;
+  under_utilized: boolean;
+  completed_blocks: number;
+  pending_blocks: number;
+  delay_reasons: Array<{ task_title: string; reason: string }>;
+}
+
+interface ManagerSummaryPayload {
+  date: string;
+  members: DailyPlanMemberRow[];
+  team_summary: {
+    total_team_members: number;
+    total_planned_minutes: number;
+    total_actual_minutes: number;
+    variance_minutes: number;
+    completed_blocks: number;
+    pending_blocks: number;
+    completion_rate_percent: number;
+  };
+  delay_reasons: Array<{ user_email: string; task_title: string; reason: string }>;
+}
+
+interface ManagerMemberTimelinePayload {
+  date: string;
+  user_email: string;
+  plan: {
+    id: string;
+    available_minutes: number;
+    total_planned_minutes: number;
+    total_actual_minutes: number;
+    status: string;
+  } | null;
+  timeline: Array<{
+    type: "gap" | "work_block";
+    from: string;
+    to: string;
+    task_title?: string;
+    sub_task?: string;
+    status?: string;
+  }>;
+  alerts: Array<{ type: string; message: string }>;
+}
+
 export default function ProjectManagerDashboard({ onNavigateToChat, onNavigateToKanban, onNavigateToProjects, onNavigateToTeamMembers }: ProjectManagerDashboardProps) {
   const { user, logout, token } = useContext(AuthContext);
   const [teamMembers, setTeamMembers] = useState<TeamMemberType[]>([]);
@@ -63,6 +112,12 @@ export default function ProjectManagerDashboard({ onNavigateToChat, onNavigateTo
   const [showOnlyToday, setShowOnlyToday] = useState(true);
   const [accountRequests, setAccountRequests] = useState<AccountRequestType[]>([]);
   const [loadingRequests, setLoadingRequests] = useState(false);
+  const [selectedSummaryDate, setSelectedSummaryDate] = useState(new Date().toISOString().split('T')[0]);
+  const [planSummary, setPlanSummary] = useState<ManagerSummaryPayload | null>(null);
+  const [loadingPlanSummary, setLoadingPlanSummary] = useState(false);
+  const [selectedTimelineMember, setSelectedTimelineMember] = useState<string | null>(null);
+  const [memberTimeline, setMemberTimeline] = useState<ManagerMemberTimelinePayload | null>(null);
+  const [loadingMemberTimeline, setLoadingMemberTimeline] = useState(false);
 
   const getTodayDate = () => {
     const today = new Date();
@@ -163,6 +218,35 @@ export default function ProjectManagerDashboard({ onNavigateToChat, onNavigateTo
     }
   };
 
+  const fetchPlanSummary = useCallback(async () => {
+    try {
+      setLoadingPlanSummary(true);
+      const response = await api.get(`/daily-plans/manager/summary?date=${selectedSummaryDate}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setPlanSummary(response.data);
+    } catch (err) {
+      console.error("Failed to fetch daily plan summary", err);
+    } finally {
+      setLoadingPlanSummary(false);
+    }
+  }, [selectedSummaryDate, token]);
+
+  const fetchMemberTimeline = useCallback(async (memberEmail: string) => {
+    try {
+      setLoadingMemberTimeline(true);
+      const response = await api.get(`/daily-plans/manager/user/${memberEmail}?date=${selectedSummaryDate}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setSelectedTimelineMember(memberEmail);
+      setMemberTimeline(response.data);
+    } catch (err) {
+      console.error("Failed to fetch member timeline", err);
+    } finally {
+      setLoadingMemberTimeline(false);
+    }
+  }, [selectedSummaryDate, token]);
+
   const handleSelectMember = (memberEmail: string) => {
     fetchMemberTasks(memberEmail);
   };
@@ -171,8 +255,18 @@ export default function ProjectManagerDashboard({ onNavigateToChat, onNavigateTo
     if (token) {
       fetchAllTeamMembers();
       fetchTodayBreakdown();
+      fetchPlanSummary();
     }
-  }, [token, fetchAllTeamMembers, fetchTodayBreakdown]);
+  }, [token, fetchAllTeamMembers, fetchTodayBreakdown, fetchPlanSummary]);
+
+  useEffect(() => {
+    if (token) {
+      fetchPlanSummary();
+      if (selectedTimelineMember) {
+        fetchMemberTimeline(selectedTimelineMember);
+      }
+    }
+  }, [selectedSummaryDate, token, selectedTimelineMember, fetchPlanSummary, fetchMemberTimeline]);
 
   const getPriorityColor = (priority: string) => {
     switch (priority) {
@@ -453,6 +547,111 @@ export default function ProjectManagerDashboard({ onNavigateToChat, onNavigateTo
           ) : (
             <div style={{ padding: 20, backgroundColor: "#e8f4f8", borderRadius: 8, color: "#004085" }}>
               No tasks scheduled for today.
+            </div>
+          )}
+        </div>
+
+        <div style={{ marginBottom: 40 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+            <h2 style={{ margin: 0 }}>🕒 Daily Plan vs Actual</h2>
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <input
+                type="date"
+                value={selectedSummaryDate}
+                onChange={(e) => setSelectedSummaryDate(e.target.value)}
+                style={{ padding: "8px 10px", border: "1px solid #ddd", borderRadius: 6 }}
+              />
+              <button
+                onClick={fetchPlanSummary}
+                disabled={loadingPlanSummary}
+                style={{
+                  padding: "8px 14px",
+                  backgroundColor: "#3498db",
+                  color: "white",
+                  border: "none",
+                  borderRadius: 4,
+                  cursor: loadingPlanSummary ? "not-allowed" : "pointer",
+                  fontSize: 12,
+                  fontWeight: "500"
+                }}
+              >
+                {loadingPlanSummary ? "Loading..." : "Refresh"}
+              </button>
+            </div>
+          </div>
+
+          {planSummary ? (
+            <>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12, marginBottom: 14 }}>
+                <div style={{ backgroundColor: "white", borderRadius: 8, padding: 12, border: "1px solid #ecf0f1" }}>
+                  <div style={{ fontSize: 12, color: "#7f8c8d" }}>Team Members</div>
+                  <div style={{ fontSize: 20, fontWeight: "bold" }}>{planSummary.team_summary.total_team_members}</div>
+                </div>
+                <div style={{ backgroundColor: "white", borderRadius: 8, padding: 12, border: "1px solid #ecf0f1" }}>
+                  <div style={{ fontSize: 12, color: "#7f8c8d" }}>Planned</div>
+                  <div style={{ fontSize: 20, fontWeight: "bold" }}>{(planSummary.team_summary.total_planned_minutes / 60).toFixed(2)}h</div>
+                </div>
+                <div style={{ backgroundColor: "white", borderRadius: 8, padding: 12, border: "1px solid #ecf0f1" }}>
+                  <div style={{ fontSize: 12, color: "#7f8c8d" }}>Actual</div>
+                  <div style={{ fontSize: 20, fontWeight: "bold" }}>{(planSummary.team_summary.total_actual_minutes / 60).toFixed(2)}h</div>
+                </div>
+                <div style={{ backgroundColor: "white", borderRadius: 8, padding: 12, border: "1px solid #ecf0f1" }}>
+                  <div style={{ fontSize: 12, color: "#7f8c8d" }}>Completion</div>
+                  <div style={{ fontSize: 20, fontWeight: "bold" }}>{planSummary.team_summary.completion_rate_percent}%</div>
+                </div>
+              </div>
+
+              <div style={{ backgroundColor: "white", borderRadius: 8, border: "1px solid #ecf0f1", overflow: "hidden", marginBottom: 14 }}>
+                {planSummary.members.map((member) => (
+                  <div
+                    key={member.user_email}
+                    onClick={() => fetchMemberTimeline(member.user_email)}
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "2fr 1fr 1fr 1fr 1fr",
+                      gap: 10,
+                      padding: "10px 12px",
+                      borderBottom: "1px solid #f4f6f8",
+                      cursor: "pointer",
+                      backgroundColor: selectedTimelineMember === member.user_email ? "#eaf2ff" : "white"
+                    }}
+                  >
+                    <div style={{ fontWeight: 600 }}>{member.user_email}</div>
+                    <div>{(member.planned_minutes / 60).toFixed(2)}h</div>
+                    <div>{(member.actual_minutes / 60).toFixed(2)}h</div>
+                    <div style={{ color: member.variance_minutes > 0 ? "#e67e22" : "#27ae60" }}>{(member.variance_minutes / 60).toFixed(2)}h</div>
+                    <div>{member.completed_blocks}/{member.completed_blocks + member.pending_blocks}</div>
+                  </div>
+                ))}
+              </div>
+
+              {loadingMemberTimeline && <div style={{ padding: 12, color: "#666" }}>Loading member timeline...</div>}
+
+              {!loadingMemberTimeline && memberTimeline && (
+                <div style={{ backgroundColor: "white", borderRadius: 8, border: "1px solid #ecf0f1", padding: 12 }}>
+                  <h4 style={{ marginTop: 0, marginBottom: 10 }}>Timeline: {memberTimeline.user_email}</h4>
+                  {(memberTimeline.timeline || []).length === 0 ? (
+                    <p style={{ margin: 0, color: "#999" }}>No plan available for selected date.</p>
+                  ) : (
+                    (memberTimeline.timeline || []).map((entry, idx) => (
+                      <div key={`${entry.type}-${idx}`} style={{
+                        padding: "8px 10px",
+                        borderRadius: 6,
+                        marginBottom: 8,
+                        backgroundColor: entry.type === "gap" ? "#fafafa" : "#f4f8ff",
+                        borderLeft: `4px solid ${entry.type === "gap" ? "#cfd8dc" : "#3498db"}`
+                      }}>
+                        <strong>{entry.from} - {entry.to}</strong>
+                        {entry.type === "gap" ? " • Free slot" : ` • ${entry.task_title}${entry.sub_task ? ` (${entry.sub_task})` : ""}`}
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
+            </>
+          ) : (
+            <div style={{ padding: 20, backgroundColor: "#e8f4f8", borderRadius: 8, color: "#004085" }}>
+              No daily planning data available for this date.
             </div>
           )}
         </div>

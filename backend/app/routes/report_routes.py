@@ -6,6 +6,14 @@ from typing import List, Optional
 
 from app.deps import get_current_user
 from app.db import project_activities, projects, reports, users
+from app.rbac import (
+    append_audit_log,
+    build_task_query_for_user,
+    can_access_project,
+    is_privileged_role,
+    require_task_view_access,
+    validate_task_assignment,
+)
 
 router = APIRouter(prefix="/reports", tags=["reports"])
 
@@ -22,6 +30,31 @@ async def _log_task_activity(project_id: str, action: str, message: str, user: d
             "created_at": datetime.utcnow(),
         }
     )
+
+
+async def _get_project_or_404(project_id: str) -> dict:
+    try:
+        object_id = ObjectId(project_id)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid project ID") from exc
+
+    project = await projects.find_one({"_id": object_id})
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return project
+
+
+def _can_manage_task(task: dict, user: dict) -> bool:
+    if is_privileged_role(user.get("role")):
+        return True
+
+    user_email = str(user.get("email") or "").strip().lower()
+    assigned_to = task.get("assigned_to") or []
+    if isinstance(assigned_to, str):
+        assigned_to = [assigned_to]
+    normalized_assignees = {str(email or "").strip().lower() for email in assigned_to if str(email or "").strip()}
+
+    return user_email in normalized_assignees
 
 
 class MOMRequest(BaseModel):
@@ -65,6 +98,10 @@ class ChatRequest(BaseModel):
 
 @router.post("/mom")
 async def create_mom(payload: MOMRequest, user=Depends(get_current_user)):
+    project = await _get_project_or_404(payload.project_id)
+    if not can_access_project(project, user):
+        raise HTTPException(status_code=403, detail="You do not have access to this project")
+
     doc = {
         "type": "MOM",
         "project_id": payload.project_id,
@@ -80,14 +117,12 @@ async def create_mom(payload: MOMRequest, user=Depends(get_current_user)):
 
 @router.post("/task")
 async def create_task(payload: TaskRequest, user=Depends(get_current_user)):
-    try:
-        project_object_id = ObjectId(payload.project_id)
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail="Invalid project ID") from exc
+    project = await _get_project_or_404(payload.project_id)
+    if not can_access_project(project, user):
+        raise HTTPException(status_code=403, detail="You do not have access to this project")
 
-    project = await projects.find_one({"_id": project_object_id})
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+    requested_assignees = payload.assigned_to or [str(user.get("email") or "").strip().lower()]
+    assigned_to = await validate_task_assignment(project, requested_assignees)
 
     stage_value = payload.stage
     if not stage_value:
@@ -110,10 +145,11 @@ async def create_task(payload: TaskRequest, user=Depends(get_current_user)):
         "estimated_time": payload.estimated_time,
         "dependencies": payload.dependencies or [],
         "resolved_dependencies": [],  # Track which dependencies have been resolved
-        "assigned_to": payload.assigned_to or [],
+        "assigned_to": assigned_to,
         "user_id": user["id"],
-        "user_email": user["email"],
-        "created_by": user["email"],
+        "user_email": str(user["email"]).strip().lower(),
+        "created_by": str(user["email"]).strip().lower(),
+        "updated_by": str(user["email"]).strip().lower(),
         "created_at": datetime.utcnow(),
         "updated_at": datetime.utcnow(),
         "chat": []
@@ -132,6 +168,13 @@ async def create_task(payload: TaskRequest, user=Depends(get_current_user)):
             "stage": stage_value,
         },
     )
+    await append_audit_log(
+        "task_created",
+        user,
+        "task",
+        str(result.inserted_id),
+        {"project_id": payload.project_id, "assigned_to": assigned_to},
+    )
 
     return {"id": str(result.inserted_id), "status": "Task submitted"}
 
@@ -141,6 +184,12 @@ async def update_task(task_id: str, payload: TaskUpdateRequest, user=Depends(get
     task = await reports.find_one({"_id": ObjectId(task_id)})
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
+
+    await require_task_view_access(task, user)
+    if not _can_manage_task(task, user):
+        raise HTTPException(status_code=403, detail="You do not have permission to update this task")
+
+    project = await _get_project_or_404(str(task.get("project_id")))
 
     update_data = {}
     
@@ -161,9 +210,13 @@ async def update_task(task_id: str, payload: TaskUpdateRequest, user=Depends(get
     if payload.dependencies is not None:
         update_data["dependencies"] = payload.dependencies
     if payload.assigned_to is not None:
-        update_data["assigned_to"] = payload.assigned_to
+        update_data["assigned_to"] = await validate_task_assignment(project, payload.assigned_to)
     
+    if not update_data:
+        raise HTTPException(status_code=400, detail="No update fields provided")
+
     update_data["updated_at"] = datetime.utcnow()
+    update_data["updated_by"] = str(user.get("email") or "").strip().lower()
     
     await reports.update_one({"_id": ObjectId(task_id)}, {"$set": update_data})
 
@@ -174,12 +227,24 @@ async def update_task(task_id: str, payload: TaskUpdateRequest, user=Depends(get
         user,
         {"task_id": task_id, "fields": list(update_data.keys())},
     )
+    await append_audit_log(
+        "task_updated",
+        user,
+        "task",
+        task_id,
+        {"fields": list(update_data.keys())},
+    )
     
     return {"id": task_id, "status": "Task updated"}
 
 
 @router.post("/task/{task_id}/chat")
 async def add_chat_to_task(task_id: str, payload: ChatRequest, user=Depends(get_current_user)):
+    task = await reports.find_one({"_id": ObjectId(task_id), "type": "TASK"})
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    await require_task_view_access(task, user)
+
     chat_message = {
         "user_email": user["email"],
         "message": payload.message,
@@ -199,10 +264,12 @@ async def add_chat_to_task(task_id: str, payload: ChatRequest, user=Depends(get_
 
 @router.get("/task/{task_id}")
 async def get_task_detail(task_id: str, user=Depends(get_current_user)):
-    task = await reports.find_one({"_id": ObjectId(task_id)})
+    task = await reports.find_one({"_id": ObjectId(task_id), "type": "TASK"})
     
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
+
+    await require_task_view_access(task, user)
     
     return {
         "id": str(task["_id"]),
@@ -228,9 +295,15 @@ async def get_task_detail(task_id: str, user=Depends(get_current_user)):
 @router.get("/tasks/{project_id}/by-date")
 async def get_tasks_by_date(project_id: str, date: str, user=Depends(get_current_user)):
     """Get all tasks for a project on a specific date, grouped by team member"""
-    tasks = await reports.find(
-        {"project_id": project_id, "type": "TASK", "task_date": date}
-    ).to_list(None)
+    project = await _get_project_or_404(project_id)
+    if not can_access_project(project, user):
+        raise HTTPException(status_code=403, detail="You do not have access to this project")
+
+    query = await build_task_query_for_user(
+        user,
+        {"project_id": project_id, "type": "TASK", "task_date": date},
+    )
+    tasks = await reports.find(query).to_list(None)
     
     # Group tasks by user
     grouped_tasks = {}
@@ -260,9 +333,12 @@ async def get_tasks_by_date(project_id: str, date: str, user=Depends(get_current
 
 @router.get("/tasks/{project_id}")
 async def get_project_tasks(project_id: str, user=Depends(get_current_user)):
-    tasks = await reports.find(
-        {"project_id": project_id, "type": "TASK"}
-    ).to_list(None)
+    project = await _get_project_or_404(project_id)
+    if not can_access_project(project, user):
+        raise HTTPException(status_code=403, detail="You do not have access to this project")
+
+    query = await build_task_query_for_user(user, {"project_id": project_id, "type": "TASK"})
+    tasks = await reports.find(query).to_list(None)
     
     # Group tasks by user
     grouped_tasks = {}
@@ -292,6 +368,10 @@ async def get_project_tasks(project_id: str, user=Depends(get_current_user)):
 
 @router.get("/moms/{project_id}")
 async def get_project_moms(project_id: str, user=Depends(get_current_user)):
+    project = await _get_project_or_404(project_id)
+    if not can_access_project(project, user):
+        raise HTTPException(status_code=403, detail="You do not have access to this project")
+
     moms = await reports.find(
         {"project_id": project_id, "type": "MOM"}
     ).to_list(None)
@@ -308,7 +388,7 @@ async def get_project_moms(project_id: str, user=Depends(get_current_user)):
 @router.get("/user-tasks")
 async def get_user_tasks(user=Depends(get_current_user)):
     tasks = await reports.find(
-        {"user_id": user["id"], "type": "TASK"}
+        await build_task_query_for_user(user, {"type": "TASK"})
     ).sort("task_date", -1).to_list(None)
     
     return [{
@@ -334,7 +414,7 @@ async def get_user_tasks(user=Depends(get_current_user)):
 async def get_all_tasks(user=Depends(get_current_user)):
     """Get all tasks in the system (for viewing tasks where user is tagged as dependency)"""
     tasks = await reports.find(
-        {"type": "TASK"}
+        await build_task_query_for_user(user, {"type": "TASK"})
     ).sort("task_date", -1).to_list(None)
     
     return [{
@@ -359,8 +439,12 @@ async def get_all_tasks(user=Depends(get_current_user)):
 @router.get("/team-members/{project_id}")
 async def get_team_members(project_id: str, user=Depends(get_current_user)):
     """Get all team members who have submitted tasks for a project"""
+    project = await _get_project_or_404(project_id)
+    if not can_access_project(project, user):
+        raise HTTPException(status_code=403, detail="You do not have access to this project")
+
     tasks = await reports.find(
-        {"project_id": project_id, "type": "TASK"}
+        await build_task_query_for_user(user, {"project_id": project_id, "type": "TASK"})
     ).to_list(None)
     
     # Get unique team members
@@ -381,8 +465,11 @@ async def get_team_members(project_id: str, user=Depends(get_current_user)):
 @router.get("/tasks/{project_id}/by-member/{member_email}")
 async def get_member_tasks_by_date(project_id: str, member_email: str, user=Depends(get_current_user)):
     """Get all tasks for a specific team member in a project, grouped by date"""
+    if not is_privileged_role(user.get("role")):
+        raise HTTPException(status_code=403, detail="Admin access required")
+
     tasks = await reports.find(
-        {"project_id": project_id, "type": "TASK", "user_email": member_email}
+        {"project_id": project_id, "type": "TASK", "assigned_to": str(member_email).strip().lower()}
     ).sort("task_date", -1).to_list(None)
     
     # Group tasks by date
@@ -414,8 +501,11 @@ async def get_member_tasks_by_date(project_id: str, member_email: str, user=Depe
 @router.get("/tasks/by-member/{member_email}")
 async def get_member_tasks_all_projects(member_email: str, user=Depends(get_current_user)):
     """Get all tasks for a specific team member across all projects, grouped by date"""
+    if not is_privileged_role(user.get("role")):
+        raise HTTPException(status_code=403, detail="Admin access required")
+
     tasks = await reports.find(
-        {"type": "TASK", "user_email": member_email}
+        {"type": "TASK", "assigned_to": str(member_email).strip().lower()}
     ).sort("task_date", -1).to_list(None)
 
     grouped_tasks = {}
@@ -447,6 +537,9 @@ async def get_member_tasks_all_projects(member_email: str, user=Depends(get_curr
 @router.get("/tasks/today/breakdown")
 async def get_today_tasks_breakdown(user=Depends(get_current_user)):
     """Get all tasks for today grouped by team member with status breakdown"""
+    if not is_privileged_role(user.get("role")):
+        raise HTTPException(status_code=403, detail="Admin access required")
+
     from datetime import datetime
     today = datetime.utcnow().date().isoformat()
     
@@ -576,9 +669,13 @@ async def get_hourly_breakdown(
 @router.put("/task/{task_id}/complete")
 async def mark_task_complete(task_id: str, user=Depends(get_current_user)):
     """Mark task as completed"""
-    task = await reports.find_one({"_id": ObjectId(task_id)})
+    task = await reports.find_one({"_id": ObjectId(task_id), "type": "TASK"})
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
+
+    await require_task_view_access(task, user)
+    if not _can_manage_task(task, user):
+        raise HTTPException(status_code=403, detail="You do not have permission to update this task")
 
     result = await reports.update_one(
         {"_id": ObjectId(task_id)},
@@ -600,10 +697,12 @@ async def mark_task_complete(task_id: str, user=Depends(get_current_user)):
 @router.put("/task/{task_id}/resolve-dependency")
 async def resolve_dependency(task_id: str, user=Depends(get_current_user)):
     """Mark dependency as resolved by the tagged user"""
-    task = await reports.find_one({"_id": ObjectId(task_id)})
+    task = await reports.find_one({"_id": ObjectId(task_id), "type": "TASK"})
     
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
+
+    await require_task_view_access(task, user)
     
     # Check if user is in the dependencies list
     dependencies = task.get("dependencies", [])
@@ -652,7 +751,7 @@ async def move_incomplete_tasks(date: str, user=Depends(get_current_user)):
     incomplete_tasks = await reports.find(
         {
             "type": "TASK",
-            "user_id": user["id"],
+            "assigned_to": str(user.get("email") or "").strip().lower(),
             "task_date": date,
             "status": {"$in": ["To Do", "In Progress"]}
         }

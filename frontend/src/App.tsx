@@ -1,4 +1,5 @@
 import { useContext, useState } from "react";
+import type { ReactElement } from "react";
 import { AuthContext } from "./context/AuthContext";
 import "./App.css";
 import Login from "./pages/Login";
@@ -10,46 +11,49 @@ import ChatPage from "./pages/ChatPage";
 import KanbanBoard from "./pages/KanbanBoard";
 import ProjectsPage from "./pages/ProjectsPage";
 import TeamMembersPage from "./pages/TeamMembersPage";
-import HourlyTaskBreakdown from "./pages/HourlyTaskBreakdown";
+import TaskManagement from "./pages/TaskManagement";
+import AppHeader from "./components/AppHeader";
 
 function App() {
   const { isAuthenticated, user } = useContext(AuthContext);
   const [showLogin, setShowLogin] = useState(true);
   const [currentPage, setCurrentPage] = useState<"dashboard" | "chat" | "kanban" | "projects" | "team-members" | "hourly-breakdown">("dashboard");
+  const isAdmin = user?.role === "admin" || user?.role === "project_manager";
+  const isTeamMember = user?.role === "team_member" || user?.role === "user" || user?.role === "member";
+  const pageTitles: Record<string, string> = {
+    dashboard: "Dashboard",
+    chat: "Chat",
+    kanban: "Kanban",
+    projects: "Projects",
+    "team-members": "Team Members",
+    "hourly-breakdown": "Task Management",
+  };
 
   if (isAuthenticated && user) {
-    if (currentPage === "chat") {
-      return <ChatPage onNavigateBack={() => setCurrentPage("dashboard")} />;
-    }
+    let currentView: ReactElement;
 
-    if (currentPage === "kanban") {
-      return (
+    if (currentPage === "chat") {
+      currentView = <ChatPage onNavigateBack={() => setCurrentPage("dashboard")} />;
+    } else if (currentPage === "kanban") {
+      currentView = (
         <KanbanBoard
           onNavigateBack={() => setCurrentPage("dashboard")}
           onNavigateToChat={() => setCurrentPage("chat")}
         />
       );
-    }
-
-    if (currentPage === "projects") {
-      return <ProjectsPage onNavigateBack={() => setCurrentPage("dashboard")} />;
-    }
-
-    if (currentPage === "team-members") {
-      return <TeamMembersPage onNavigateBack={() => setCurrentPage("dashboard")} />;
-    }
-
-    if (currentPage === "hourly-breakdown") {
-      return (
-        <HourlyTaskBreakdown
+    } else if (currentPage === "projects") {
+      currentView = <ProjectsPage onNavigateBack={() => setCurrentPage("dashboard")} />;
+    } else if (currentPage === "team-members") {
+      currentView = <TeamMembersPage onNavigateBack={() => setCurrentPage("dashboard")} />;
+    } else if (currentPage === "hourly-breakdown") {
+      currentView = (
+        <TaskManagement
           onNavigateToTeamMemberDashboard={() => setCurrentPage("dashboard")}
           onNavigateToProjects={() => setCurrentPage("projects")}
         />
       );
-    }
-
-    if (user.role === "project_manager") {
-      return (
+    } else if (isAdmin) {
+      currentView = (
         <ProjectManagerDashboard
           onNavigateToChat={() => setCurrentPage("chat")}
           onNavigateToKanban={() => setCurrentPage("kanban")}
@@ -57,8 +61,8 @@ function App() {
           onNavigateToTeamMembers={() => setCurrentPage("team-members")}
         />
       );
-    } else if (user.role === "team_member") {
-      return (
+    } else if (isTeamMember) {
+      currentView = (
         <TeamMemberDashboard
           onNavigateToChat={() => setCurrentPage("chat")}
           onNavigateToKanban={() => setCurrentPage("kanban")}
@@ -67,9 +71,20 @@ function App() {
         />
       );
     } else {
-      // Default dashboard for other roles
-      return <Dashboard />;
+      currentView = <Dashboard />;
     }
+
+    return (
+      <div style={{ minHeight: "100vh", backgroundColor: "#F5F6FA" }}>
+        <AppHeader
+          user={user}
+          pageTitle={pageTitles[currentPage] || "Workspace"}
+          showDashboardButton={currentPage !== "dashboard"}
+          onGoDashboard={() => setCurrentPage("dashboard")}
+        />
+        <main>{currentView}</main>
+      </div>
+    );
   }
 
   return (

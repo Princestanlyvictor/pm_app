@@ -54,15 +54,16 @@ export default function KanbanBoard({ onNavigateToChat, onNavigateBack }: Kanban
     try {
       setLoading(true);
       let response;
+      const isTeamMember = user?.role === "team_member" || user?.role === "user" || user?.role === "member";
+      const isAdmin = user?.role === "admin" || user?.role === "project_manager";
 
-      if (user?.role === "team_member") {
+      if (isTeamMember) {
         // Team members see only their own tasks
         response = await api.get("/reports/user-tasks", {
           headers: { Authorization: `Bearer ${token}` }
         });
-      } else if (user?.role === "project_manager") {
-        // Project managers would need to select a project first
-        // For now, we'll fetch all tasks from the last project they viewed
+      } else if (isAdmin) {
+        // Admin gets a filtered task feed from backend permissions.
         response = await api.get("/reports/user-tasks", {
           headers: { Authorization: `Bearer ${token}` }
         });

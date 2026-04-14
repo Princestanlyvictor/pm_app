@@ -90,10 +90,10 @@ export default function Register({ switchToLogin }: { switchToLogin: () => void 
         <div className="role-switch">
           <button
             type="button"
-            className={`role-btn ${role === "project_manager" ? "active" : ""}`}
-            onClick={() => setRole("project_manager")}
+            className={`role-btn ${role === "admin" ? "active" : ""}`}
+            onClick={() => setRole("admin")}
           >
-            Project Manager
+            Admin
           </button>
           <button
             type="button"

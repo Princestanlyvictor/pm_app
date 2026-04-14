@@ -55,12 +55,22 @@ interface TaskFilters {
 
 export default function ProjectsPage({ onNavigateBack }: ProjectsPageProps) {
   const { user, token } = useContext(AuthContext) as AuthContextValue;
+  const isAdmin = user?.role === "admin" || user?.role === "project_manager";
 
   const [projects, setProjects] = useState<ProjectType[]>([]);
   const [newProjectName, setNewProjectName] = useState("");
   const [newProjectDesc, setNewProjectDesc] = useState("");
+  const [newProjectTeamMembers, setNewProjectTeamMembers] = useState("");
   const [loading, setLoading] = useState(false);
   const [showCreateForm, setShowCreateForm] = useState(false);
+  const [showEditForm, setShowEditForm] = useState(false);
+  const [savingProjectEdits, setSavingProjectEdits] = useState(false);
+
+  const [editProjectName, setEditProjectName] = useState("");
+  const [editProjectDesc, setEditProjectDesc] = useState("");
+  const [editProjectStartDate, setEditProjectStartDate] = useState("");
+  const [editProjectEndDate, setEditProjectEndDate] = useState("");
+  const [editProjectTeamMembers, setEditProjectTeamMembers] = useState("");
 
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<WorkspaceTab>("overview");
@@ -223,12 +233,20 @@ export default function ProjectsPage({ onNavigateBack }: ProjectsPageProps) {
       setLoading(true);
       await api.post(
         `/projects`,
-        { name: newProjectName, description: newProjectDesc },
+        {
+          name: newProjectName,
+          description: newProjectDesc,
+          team_members: newProjectTeamMembers
+            .split(",")
+            .map((value) => value.trim().toLowerCase())
+            .filter(Boolean),
+        },
         { headers: { Authorization: `Bearer ${token}` } }
       );
       alert("Project created successfully!");
       setNewProjectName("");
       setNewProjectDesc("");
+      setNewProjectTeamMembers("");
       setShowCreateForm(false);
       await fetchProjects();
     } catch (err) {
@@ -241,9 +259,68 @@ export default function ProjectsPage({ onNavigateBack }: ProjectsPageProps) {
   };
 
   const handleSelectProject = async (projectId: string) => {
+    const project = projects.find((item) => item.id === projectId);
+    if (project) {
+      setEditProjectName(project.name || "");
+      setEditProjectDesc(project.description || "");
+      setEditProjectStartDate(project.start_date || "");
+      setEditProjectEndDate(project.end_date || "");
+      setEditProjectTeamMembers((project.team_members || []).join(", "));
+      setUpdatingStatus(project.status || "Active");
+    }
+
+    setShowEditForm(false);
+    setShowMemberForm(false);
     setSelectedProjectId(projectId);
     setActiveTab("overview");
     await loadWorkspaceBundle(projectId);
+  };
+
+  const handleEditProject = async () => {
+    if (!selectedProjectId) {
+      return;
+    }
+
+    if (!editProjectName.trim()) {
+      alert("Project name is required");
+      return;
+    }
+
+    const teamMembers = editProjectTeamMembers
+      .split(",")
+      .map((value) => value.trim().toLowerCase())
+      .filter(Boolean);
+
+    try {
+      setSavingProjectEdits(true);
+
+      await api.patch(
+        `/projects/${selectedProjectId}/settings`,
+        {
+          name: editProjectName.trim(),
+          description: editProjectDesc,
+          status: updatingStatus,
+          start_date: editProjectStartDate,
+          end_date: editProjectEndDate,
+        },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      await api.put(
+        `/projects/${selectedProjectId}/assignments`,
+        { team_members: teamMembers },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      await Promise.all([fetchProjects(), fetchWorkspace(selectedProjectId)]);
+      setShowEditForm(false);
+      alert("Project updated successfully");
+    } catch (error) {
+      const typedError = error as { response?: { data?: { detail?: string } } };
+      alert(typedError.response?.data?.detail || "Failed to update project");
+    } finally {
+      setSavingProjectEdits(false);
+    }
   };
 
   const handleTaskFilterChange = (key: keyof TaskFilters, value: string) => {
@@ -430,18 +507,8 @@ export default function ProjectsPage({ onNavigateBack }: ProjectsPageProps) {
         </button>
       </div>
 
-      {/* User Info */}
-      <div style={{ backgroundColor: "white", padding: 20, borderRadius: 12, marginBottom: 24, boxShadow: "0 6px 20px rgba(14,10,60,0.06)", border: "1px solid #ECEEF5" }}>
-        <p style={{ margin: "0 0 5px 0", fontSize: 14, color: "#666" }}>
-          <strong>Logged in as:</strong> {user?.email}
-        </p>
-        <p style={{ margin: 0, fontSize: 14, color: "#666" }}>
-          <strong>Role:</strong> {user?.role?.replace('_', ' ')}
-        </p>
-      </div>
-
       {/* Create Project Button */}
-      {user?.role === "project_manager" && (
+      {isAdmin && (
         <div style={{ marginBottom: 30 }}>
           <button
             onClick={() => setShowCreateForm(!showCreateForm)}
@@ -504,6 +571,25 @@ export default function ProjectsPage({ onNavigateBack }: ProjectsPageProps) {
               }}
             />
           </div>
+          <div style={{ marginBottom: 20 }}>
+            <label style={{ display: "block", marginBottom: 8, fontWeight: "bold" }}>
+              Team Members (comma-separated emails)
+            </label>
+            <input
+              type="text"
+              placeholder="member1@company.com, member2@company.com"
+              value={newProjectTeamMembers}
+              onChange={(e) => setNewProjectTeamMembers(e.target.value)}
+              style={{
+                width: "100%",
+                padding: "12px",
+                borderRadius: 8,
+                border: "1px solid #ddd",
+                fontSize: 14,
+                boxSizing: "border-box"
+              }}
+            />
+          </div>
           <button
             onClick={handleCreateProject}
             disabled={loading}
@@ -524,106 +610,100 @@ export default function ProjectsPage({ onNavigateBack }: ProjectsPageProps) {
         </div>
       )}
 
-      {/* Projects List */}
-      <div style={{ backgroundColor: "white", padding: 24, borderRadius: 12, boxShadow: "0 6px 20px rgba(14,10,60,0.06)", border: "1px solid #ECEEF5" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-          <h2 style={{ margin: 0 }}>All Projects ({projects.length})</h2>
-          <button
-            onClick={fetchProjects}
-            disabled={loading}
-            style={{
-              padding: "8px 16px",
-              backgroundColor: "#0E0A3C",
-              color: "white",
-              border: "none",
-              borderRadius: 8,
-              cursor: loading ? "not-allowed" : "pointer",
-              fontSize: 12,
-              fontWeight: "500"
-            }}
-          >
-            {loading ? "Loading..." : "🔄 Refresh"}
-          </button>
-        </div>
-
-        {loading && projects.length === 0 ? (
+      {/* Workspace With Sidebar */}
+      {loading && projects.length === 0 ? (
+        <div style={{ backgroundColor: "white", padding: 24, borderRadius: 12, boxShadow: "0 6px 20px rgba(14,10,60,0.06)", border: "1px solid #ECEEF5", marginTop: 16 }}>
           <p style={{ color: "#666", textAlign: "center", padding: 40 }}>Loading projects...</p>
-        ) : projects.length > 0 ? (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: 20 }}>
-            {projects.map((project) => (
-              <div
-                key={project.id}
+        </div>
+      ) : projects.length > 0 ? (
+        <div style={{ display: "flex", gap: 16, marginTop: 16, alignItems: "flex-start", flexWrap: "wrap" }}>
+          <aside style={{ flex: "1 1 280px", minWidth: 260, maxWidth: 320, backgroundColor: "white", borderRadius: 12, border: "1px solid #ECEEF5", boxShadow: "0 6px 20px rgba(14,10,60,0.06)", padding: 16 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+              <h2 style={{ margin: 0, fontSize: 20, color: "#0E0A3C" }}>Projects ({projects.length})</h2>
+              <button
+                onClick={fetchProjects}
+                disabled={loading}
                 style={{
-                  padding: 20,
-                  backgroundColor: selectedProjectId === project.id ? "#EEF2FF" : "#F9FAFC",
-                  border: selectedProjectId === project.id ? "2px solid #0E0A3C" : "1px solid #E9EDF4",
-                  borderRadius: 12,
-                  transition: "all 0.3s ease",
-                  cursor: "pointer"
-                }}
-                onClick={() => handleSelectProject(project.id)}
-                onMouseEnter={(e) => {
-                  if (selectedProjectId !== project.id) {
-                    e.currentTarget.style.borderColor = "#0E0A3C";
-                  }
-                  e.currentTarget.style.boxShadow = "0 10px 24px rgba(14,10,60,0.08)";
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.borderColor = selectedProjectId === project.id ? "#0E0A3C" : "#E9EDF4";
-                  e.currentTarget.style.boxShadow = "none";
+                  padding: "7px 12px",
+                  backgroundColor: "#0E0A3C",
+                  color: "white",
+                  border: "none",
+                  borderRadius: 8,
+                  cursor: loading ? "not-allowed" : "pointer",
+                  fontSize: 12,
+                  fontWeight: "600",
                 }}
               >
-                <h3 style={{ margin: "0 0 8px 0", color: "#0E0A3C", fontSize: 18 }}>
-                  📁 {project.name}
-                </h3>
-                <p style={{ margin: "0 0 15px 0", color: "#666", fontSize: 14, minHeight: 40 }}>
-                  {project.description || "No description provided"}
-                </p>
-                <div style={{ marginBottom: 10 }}>
-                  <span
-                    style={{
-                      backgroundColor: project.status === "Completed" ? "#DCFCE7" : project.status === "On Hold" ? "#FEF3C7" : "#E0E7FF",
-                      color: project.status === "Completed" ? "#166534" : project.status === "On Hold" ? "#92400E" : "#1E3A8A",
-                      borderRadius: 999,
-                      fontSize: 12,
-                      padding: "4px 10px",
-                      fontWeight: 700,
-                    }}
-                  >
-                    {project.status || "Active"}
-                  </span>
-                </div>
-                <div style={{ borderTop: "1px solid #dee2e6", paddingTop: 10 }}>
-                  <p style={{ margin: "5px 0", fontSize: 12, color: "#999" }}>
-                    <strong>Created by:</strong> {project.created_by}
-                  </p>
-                  <p style={{ margin: "5px 0", fontSize: 12, color: "#999" }}>
-                    <strong>Created:</strong> {new Date(project.created_at).toLocaleDateString()}
-                  </p>
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div style={{ textAlign: "center", padding: 60, color: "#999" }}>
-            <p style={{ fontSize: 18, marginBottom: 10 }}>📂 No projects yet</p>
-            <p style={{ fontSize: 14 }}>
-              {user?.role === "project_manager" 
-                ? "Create your first project to get started!"
-                : "Projects will appear here once created by the Project Manager"}
-            </p>
-          </div>
-        )}
-      </div>
-
-      {selectedProject && (
-        <div style={{ marginTop: 24, backgroundColor: "white", borderRadius: 12, border: "1px solid #ECEEF5", boxShadow: "0 6px 20px rgba(14,10,60,0.06)", padding: 20 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16, flexWrap: "wrap", marginBottom: 16 }}>
-            <div>
-              <h2 style={{ margin: 0, color: "#0E0A3C" }}>{selectedProject.name} Workspace</h2>
-              <p style={{ margin: "4px 0 0", color: "#6B7280" }}>{selectedProject.description || "No project description provided"}</p>
+                {loading ? "Loading..." : "Refresh"}
+              </button>
             </div>
 
+            <label htmlFor="project-switch" style={{ display: "block", fontSize: 13, color: "#4B5563", fontWeight: 700, marginBottom: 8 }}>
+              Switch Project
+            </label>
+            <select
+              id="project-switch"
+              value={selectedProjectId || ""}
+              onChange={(event) => {
+                const nextProjectId = event.target.value;
+                if (nextProjectId) {
+                  void handleSelectProject(nextProjectId);
+                }
+              }}
+              style={{ width: "100%", padding: 10, borderRadius: 8, border: "1px solid #D8DEEC", fontSize: 14, backgroundColor: "#fff", marginBottom: 14 }}
+            >
+              <option value="" disabled>
+                Select a project
+              </option>
+              {projects.map((project) => (
+                <option key={project.id} value={project.id}>
+                  {project.name}
+                </option>
+              ))}
+            </select>
+
+            {selectedProject ? null : (
+              <div style={{ border: "1px dashed #D8DEEC", borderRadius: 10, padding: 12, color: "#6B7280", fontSize: 13 }}>
+                Select a project to open its workspace.
+              </div>
+            )}
+
+            {selectedProject && (
+              <div style={{ marginTop: 14, borderTop: "1px solid #EEF1F8", paddingTop: 14 }}>
+                <h3 style={{ margin: "0 0 4px", color: "#0E0A3C", fontSize: 22 }}>{selectedProject.name} Workspace</h3>
+                <p style={{ margin: "0 0 12px", color: "#6B7280", fontSize: 14 }}>
+                  {selectedProject.description || "No project description provided"}
+                </p>
+
+                <div style={{ display: "grid", gap: 8 }}>
+                  {tabs.map((tab) => (
+                    <button
+                      key={tab.key}
+                      type="button"
+                      onClick={() => setActiveTab(tab.key)}
+                      style={{
+                        border: "none",
+                        borderRadius: 10,
+                        padding: "10px 12px",
+                        cursor: "pointer",
+                        fontWeight: 700,
+                        textAlign: "left",
+                        backgroundColor: activeTab === tab.key ? "#0E0A3C" : "#EEF1F8",
+                        color: activeTab === tab.key ? "white" : "#3A425A",
+                      }}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </aside>
+
+          <div style={{ flex: "3 1 680px", minWidth: 320 }}>
+            {selectedProject ? (
+              <div style={{ backgroundColor: "white", borderRadius: 12, border: "1px solid #ECEEF5", boxShadow: "0 6px 20px rgba(14,10,60,0.06)", padding: 20 }}>
+          <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 16, flexWrap: "wrap", marginBottom: 16 }}>
             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
               <button type="button" onClick={() => setActiveTab("tasks")} style={{ border: "none", borderRadius: 8, backgroundColor: "#FF7A00", color: "white", padding: "8px 12px", cursor: "pointer", fontWeight: 700 }}>
                 Add Task
@@ -631,6 +711,9 @@ export default function ProjectsPage({ onNavigateBack }: ProjectsPageProps) {
 
               {canManageProject && (
                 <>
+                  <button type="button" onClick={() => setShowEditForm((value) => !value)} style={{ border: "none", borderRadius: 8, backgroundColor: "#EAF0FF", color: "#0E0A3C", padding: "8px 12px", cursor: "pointer", fontWeight: 700 }}>
+                    {showEditForm ? "Close Edit" : "Edit Project"}
+                  </button>
                   <button type="button" onClick={() => setShowMemberForm((value) => !value)} style={{ border: "none", borderRadius: 8, backgroundColor: "#0E0A3C", color: "white", padding: "8px 12px", cursor: "pointer", fontWeight: 700 }}>
                     {showMemberForm ? "Cancel" : "Add Member"}
                   </button>
@@ -666,27 +749,62 @@ export default function ProjectsPage({ onNavigateBack }: ProjectsPageProps) {
             </div>
           )}
 
-          <div style={{ display: "flex", gap: 8, marginBottom: 16, overflowX: "auto" }}>
-            {tabs.map((tab) => (
+          {showEditForm && canManageProject && (
+            <div style={{ marginBottom: 14, border: "1px solid #ECEEF5", borderRadius: 10, padding: 12, backgroundColor: "#FAFBFF" }}>
+              <h3 style={{ marginTop: 0, marginBottom: 12, color: "#0E0A3C" }}>Edit Existing Project</h3>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
+                <input
+                  placeholder="Project name"
+                  value={editProjectName}
+                  onChange={(event) => setEditProjectName(event.target.value)}
+                  style={{ padding: 9, borderRadius: 8, border: "1px solid #D8DEEC" }}
+                />
+                <select value={updatingStatus} onChange={(event) => setUpdatingStatus(event.target.value as ProjectStatus)} style={{ padding: 9, borderRadius: 8, border: "1px solid #D8DEEC" }}>
+                  <option value="Active">Active</option>
+                  <option value="On Hold">On Hold</option>
+                  <option value="Completed">Completed</option>
+                </select>
+              </div>
+
+              <textarea
+                placeholder="Project description"
+                value={editProjectDesc}
+                onChange={(event) => setEditProjectDesc(event.target.value)}
+                style={{ width: "100%", minHeight: 90, marginBottom: 10, padding: 9, borderRadius: 8, border: "1px solid #D8DEEC", boxSizing: "border-box", fontFamily: "inherit" }}
+              />
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
+                <input
+                  type="date"
+                  value={editProjectStartDate}
+                  onChange={(event) => setEditProjectStartDate(event.target.value)}
+                  style={{ padding: 9, borderRadius: 8, border: "1px solid #D8DEEC" }}
+                />
+                <input
+                  type="date"
+                  value={editProjectEndDate}
+                  onChange={(event) => setEditProjectEndDate(event.target.value)}
+                  style={{ padding: 9, borderRadius: 8, border: "1px solid #D8DEEC" }}
+                />
+              </div>
+
+              <input
+                placeholder="Team members (comma-separated emails)"
+                value={editProjectTeamMembers}
+                onChange={(event) => setEditProjectTeamMembers(event.target.value)}
+                style={{ width: "100%", marginBottom: 10, padding: 9, borderRadius: 8, border: "1px solid #D8DEEC", boxSizing: "border-box" }}
+              />
+
               <button
-                key={tab.key}
                 type="button"
-                onClick={() => setActiveTab(tab.key)}
-                style={{
-                  border: "none",
-                  borderRadius: 999,
-                  padding: "8px 14px",
-                  cursor: "pointer",
-                  fontWeight: 700,
-                  backgroundColor: activeTab === tab.key ? "#0E0A3C" : "#EEF1F8",
-                  color: activeTab === tab.key ? "white" : "#3A425A",
-                  whiteSpace: "nowrap",
-                }}
+                onClick={handleEditProject}
+                disabled={savingProjectEdits}
+                style={{ border: "none", borderRadius: 8, backgroundColor: "#FF7A00", color: "white", padding: "9px 14px", cursor: savingProjectEdits ? "not-allowed" : "pointer", fontWeight: 700, opacity: savingProjectEdits ? 0.7 : 1 }}
               >
-                {tab.label}
+                {savingProjectEdits ? "Saving..." : "Save Project Changes"}
               </button>
-            ))}
-          </div>
+            </div>
+          )}
 
           {activeTab === "overview" && (
             <ProjectOverviewTab workspace={workspace} loading={loadingWorkspace} onRefresh={() => selectedProjectId && fetchWorkspace(selectedProjectId)} />
@@ -741,6 +859,24 @@ export default function ProjectsPage({ onNavigateBack }: ProjectsPageProps) {
               onSave={handleSaveRepository}
             />
           )}
+              </div>
+            ) : (
+              <div style={{ backgroundColor: "white", borderRadius: 12, border: "1px solid #ECEEF5", boxShadow: "0 6px 20px rgba(14,10,60,0.06)", padding: 24, color: "#6B7280" }}>
+                Choose a project from the sidebar to view its workspace.
+              </div>
+            )}
+          </div>
+        </div>
+      ) : (
+        <div style={{ backgroundColor: "white", padding: 24, borderRadius: 12, boxShadow: "0 6px 20px rgba(14,10,60,0.06)", border: "1px solid #ECEEF5", marginTop: 16 }}>
+          <div style={{ textAlign: "center", padding: 60, color: "#999" }}>
+            <p style={{ fontSize: 18, marginBottom: 10 }}>📂 No projects yet</p>
+            <p style={{ fontSize: 14 }}>
+              {isAdmin
+                ? "Create your first project to get started!"
+                : "Projects will appear here once created by the Project Manager"}
+            </p>
+          </div>
         </div>
       )}
     </div>

@@ -7,6 +7,7 @@ from pydantic import BaseModel
 
 from app.db import project_activities, project_docs, projects, reports, users
 from app.deps import get_current_user
+from app.rbac import append_audit_log, can_access_project, is_privileged_role, validate_users_exist
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
@@ -31,24 +32,29 @@ def _serialize(value: Any) -> Any:
 
 
 def _get_member_role(project_doc: Dict[str, Any], user: Dict[str, Any]) -> Optional[str]:
-    if user.get("role") in ["admin", "project_manager"]:
+    if is_privileged_role(user.get("role")):
         return "project_manager"
 
+    user_email = str(user.get("email") or "").strip().lower()
     members = project_doc.get("members", [])
     for member in members:
-        if member.get("email") == user.get("email"):
+        if str(member.get("email") or "").strip().lower() == user_email:
             return member.get("role", "viewer")
 
-    if user.get("email") in project_doc.get("team_members", []):
+    if user_email in [str(email or "").strip().lower() for email in project_doc.get("team_members", [])]:
         return "developer"
 
     return None
 
 
 def _require_project_access(project_doc: Dict[str, Any], user: Dict[str, Any]) -> str:
+    if not can_access_project(project_doc, user):
+        raise HTTPException(status_code=403, detail="You do not have access to this project")
+
     role = _get_member_role(project_doc, user)
     if role is None:
-        raise HTTPException(status_code=403, detail="You do not have access to this project")
+        # Non-member privileged users still need a role for downstream checks.
+        return "project_manager"
     return role
 
 
@@ -109,6 +115,7 @@ class ProjectCreate(BaseModel):
 
 
 class ProjectSettingsUpdate(BaseModel):
+    name: Optional[str] = None
     description: Optional[str] = None
     status: Optional[Literal["Active", "On Hold", "Completed"]] = None
     start_date: Optional[str] = None
@@ -118,6 +125,10 @@ class ProjectSettingsUpdate(BaseModel):
 class ProjectMemberAssign(BaseModel):
     email: str
     role: Literal["project_manager", "developer", "viewer"] = "developer"
+
+
+class ProjectAssignmentsUpdate(BaseModel):
+    team_members: List[str] = []
 
 
 class StageCreate(BaseModel):
@@ -158,17 +169,20 @@ class ProjectDocUpdate(BaseModel):
 
 @router.post("")
 async def create_project(payload: ProjectCreate, user=Depends(get_current_user)):
-    if user.get("role") not in ["project_manager", "admin"]:
+    if not is_privileged_role(user.get("role")):
         raise HTTPException(status_code=403, detail="Only project managers can create projects")
 
     existing = await projects.find_one({"name": payload.name})
     if existing:
         raise HTTPException(status_code=400, detail="Project with this name already exists")
 
-    member_map: Dict[str, str] = {user["email"]: "project_manager"}
+    normalized_team_members = [str(email).strip().lower() for email in payload.team_members if str(email).strip()]
+    await validate_users_exist(normalized_team_members)
+
+    member_map: Dict[str, str] = {str(user["email"]).strip().lower(): "project_manager"}
     if payload.project_manager_email:
-        member_map[payload.project_manager_email] = "project_manager"
-    for member_email in payload.team_members:
+        member_map[str(payload.project_manager_email).strip().lower()] = "project_manager"
+    for member_email in normalized_team_members:
         member_map.setdefault(member_email, "developer")
 
     members = [
@@ -201,6 +215,7 @@ async def create_project(payload: ProjectCreate, user=Depends(get_current_user))
         "created_by_id": user.get("id"),
         "created_at": now,
         "updated_at": now,
+        "updated_by": user.get("email"),
     }
 
     result = await projects.insert_one(doc)
@@ -211,7 +226,14 @@ async def create_project(payload: ProjectCreate, user=Depends(get_current_user))
         "project_created",
         f"Project '{payload.name}' created",
         user,
-        {"status": payload.status},
+        {"status": payload.status, "team_members": doc.get("team_members", [])},
+    )
+    await append_audit_log(
+        "project_created",
+        user,
+        "project",
+        project_id,
+        {"name": payload.name, "team_members": doc.get("team_members", [])},
     )
 
     return {
@@ -226,12 +248,11 @@ async def create_project(payload: ProjectCreate, user=Depends(get_current_user))
 @router.get("")
 async def list_projects(user=Depends(get_current_user)):
     query: Dict[str, Any] = {}
-    if user.get("role") not in ["project_manager", "admin"]:
+    if not is_privileged_role(user.get("role")):
         query = {
             "$or": [
-                {"members.email": user.get("email")},
-                {"team_members": user.get("email")},
-                {"created_by": user.get("email")},
+                {"members.email": str(user.get("email") or "").strip().lower()},
+                {"team_members": str(user.get("email") or "").strip().lower()},
             ]
         }
 
@@ -291,7 +312,19 @@ async def update_project_settings(project_id: str, payload: ProjectSettingsUpdat
     if not update_data:
         raise HTTPException(status_code=400, detail="No update fields provided")
 
+    if "name" in update_data:
+        normalized_name = str(update_data["name"]).strip()
+        if not normalized_name:
+            raise HTTPException(status_code=400, detail="Project name cannot be empty")
+
+        duplicate = await projects.find_one({"name": normalized_name, "_id": {"$ne": project["_id"]}})
+        if duplicate:
+            raise HTTPException(status_code=400, detail="Project with this name already exists")
+
+        update_data["name"] = normalized_name
+
     update_data["updated_at"] = datetime.utcnow()
+    update_data["updated_by"] = user.get("email")
     await projects.update_one({"_id": project["_id"]}, {"$set": update_data})
 
     await _log_activity(
@@ -301,8 +334,40 @@ async def update_project_settings(project_id: str, payload: ProjectSettingsUpdat
         user,
         {"fields": list(update_data.keys())},
     )
+    await append_audit_log(
+        "project_settings_updated",
+        user,
+        "project",
+        project_id,
+        {"fields": list(update_data.keys())},
+    )
 
     return {"status": "Project settings updated"}
+
+
+@router.delete("/{project_id}")
+async def delete_project(project_id: str, user=Depends(get_current_user)):
+    if not is_privileged_role(user.get("role")):
+        raise HTTPException(status_code=403, detail="Only admins can delete projects")
+
+    project = await projects.find_one({"_id": _to_object_id(project_id)})
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    await projects.delete_one({"_id": project["_id"]})
+    await reports.delete_many({"type": "TASK", "project_id": project_id})
+    await project_docs.delete_many({"project_id": project_id})
+
+    await _log_activity(project_id, "project_deleted", f"Project '{project.get('name')}' deleted", user)
+    await append_audit_log(
+        "project_deleted",
+        user,
+        "project",
+        project_id,
+        {"name": project.get("name")},
+    )
+
+    return {"status": "Project deleted"}
 
 
 @router.get("/{project_id}/members")
@@ -339,23 +404,26 @@ async def assign_project_member(project_id: str, payload: ProjectMemberAssign, u
 
     _require_pm_access(project, user)
 
-    existing_user = await users.find_one({"email": payload.email})
+    normalized_email = str(payload.email).strip().lower()
+
+    existing_user = await users.find_one({"email": normalized_email})
     if not existing_user:
         raise HTTPException(status_code=404, detail="User not found")
 
     members = project.get("members", [])
     updated = False
     for member in members:
-        if member.get("email") == payload.email:
+        if str(member.get("email") or "").strip().lower() == normalized_email:
             member["role"] = payload.role
             member["updated_at"] = datetime.utcnow()
+            member["updated_by"] = user.get("email")
             updated = True
             break
 
     if not updated:
         members.append(
             {
-                "email": payload.email,
+                "email": normalized_email,
                 "role": payload.role,
                 "added_at": datetime.utcnow(),
                 "added_by": user.get("email"),
@@ -370,6 +438,7 @@ async def assign_project_member(project_id: str, payload: ProjectMemberAssign, u
                 "members": members,
                 "team_members": team_members,
                 "updated_at": datetime.utcnow(),
+                "updated_by": user.get("email"),
             }
         },
     )
@@ -377,12 +446,85 @@ async def assign_project_member(project_id: str, payload: ProjectMemberAssign, u
     await _log_activity(
         project_id,
         "member_added_or_updated",
-        f"Member {payload.email} assigned role {payload.role}",
+        f"Member {normalized_email} assigned role {payload.role}",
         user,
-        {"member": payload.email, "role": payload.role},
+        {"member": normalized_email, "role": payload.role},
+    )
+    await append_audit_log(
+        "project_member_updated",
+        user,
+        "project",
+        project_id,
+        {"member": normalized_email, "role": payload.role},
     )
 
     return {"status": "Member assignment updated"}
+
+
+@router.put("/{project_id}/assignments")
+async def update_project_assignments(project_id: str, payload: ProjectAssignmentsUpdate, user=Depends(get_current_user)):
+    project = await projects.find_one({"_id": _to_object_id(project_id)})
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    _require_pm_access(project, user)
+
+    team_members = [str(email).strip().lower() for email in payload.team_members if str(email).strip()]
+    await validate_users_exist(team_members)
+
+    members = [member for member in (project.get("members", []) or []) if member.get("role") == "project_manager"]
+    now = datetime.utcnow()
+    existing_pm_emails = {str(member.get("email") or "").strip().lower() for member in members}
+    project_manager_email = str(project.get("project_manager_email") or "").strip().lower()
+    if project_manager_email and project_manager_email not in existing_pm_emails:
+        members.append(
+            {
+                "email": project_manager_email,
+                "role": "project_manager",
+                "added_at": now,
+                "added_by": "system_sync",
+            }
+        )
+
+    members.extend(
+        {
+            "email": email,
+            "role": "developer",
+            "added_at": now,
+            "added_by": user.get("email"),
+        }
+        for email in team_members
+    )
+
+    await projects.update_one(
+        {"_id": project["_id"]},
+        {
+            "$set": {
+                "members": members,
+                "team_members": team_members,
+                "updated_at": now,
+                "updated_by": user.get("email"),
+                "legacy_visibility": "assigned",
+            }
+        },
+    )
+
+    await _log_activity(
+        project_id,
+        "project_assignments_updated",
+        "Project team assignments updated",
+        user,
+        {"team_members": team_members},
+    )
+    await append_audit_log(
+        "project_assignments_updated",
+        user,
+        "project",
+        project_id,
+        {"team_members": team_members},
+    )
+
+    return {"status": "Project assignments updated", "team_members": team_members}
 
 
 @router.get("/{project_id}/workspace")
@@ -393,7 +535,10 @@ async def get_project_workspace(project_id: str, user=Depends(get_current_user))
 
     role = _require_project_access(project, user)
 
-    task_rows = await reports.find({"type": "TASK", "project_id": project_id}).to_list(None)
+    task_query: Dict[str, Any] = {"type": "TASK", "project_id": project_id}
+    if not is_privileged_role(user.get("role")):
+        task_query["assigned_to"] = str(user.get("email") or "").strip().lower()
+    task_rows = await reports.find(task_query).to_list(None)
     today = date.today()
     total_tasks = len(task_rows)
     completed = len([task for task in task_rows if str(task.get("status", "")).lower() in ["done", "completed"]])
@@ -474,6 +619,8 @@ async def get_project_tasks(
     _require_project_access(project, user)
 
     query: Dict[str, Any] = {"type": "TASK", "project_id": project_id}
+    if not is_privileged_role(user.get("role")):
+        query["assigned_to"] = str(user.get("email") or "").strip().lower()
     if status:
         query["status"] = status
     if priority:
@@ -481,9 +628,12 @@ async def get_project_tasks(
     if stage:
         query["stage"] = stage
     if assignee:
+        normalized_assignee = str(assignee).strip().lower()
+        if not is_privileged_role(user.get("role")) and normalized_assignee != str(user.get("email") or "").strip().lower():
+            raise HTTPException(status_code=403, detail="Team members can only filter by themselves")
         query["$or"] = [
-            {"user_email": assignee},
-            {"assigned_to": assignee},
+            {"user_email": normalized_assignee},
+            {"assigned_to": normalized_assignee},
             {"dependencies": assignee},
             {"created_by": assignee},
         ]
@@ -528,7 +678,10 @@ async def get_project_roadmap(project_id: str, user=Depends(get_current_user)):
 
     roadmap = project.get("roadmap") or _build_default_roadmap()
     stages = roadmap.get("stages", [])
-    task_rows = await reports.find({"type": "TASK", "project_id": project_id}).to_list(None)
+    task_query: Dict[str, Any] = {"type": "TASK", "project_id": project_id}
+    if not is_privileged_role(user.get("role")):
+        task_query["assigned_to"] = str(user.get("email") or "").strip().lower()
+    task_rows = await reports.find(task_query).to_list(None)
 
     stage_progress = []
     for stage in stages:
@@ -577,7 +730,7 @@ async def add_roadmap_stage(project_id: str, payload: StageCreate, user=Depends(
 
     await projects.update_one(
         {"_id": project["_id"]},
-        {"$set": {"roadmap": roadmap, "updated_at": datetime.utcnow()}},
+        {"$set": {"roadmap": roadmap, "updated_at": datetime.utcnow(), "updated_by": user.get("email")}},
     )
 
     await _log_activity(project_id, "stage_added", f"Roadmap stage '{payload.name}' added", user)
@@ -606,7 +759,7 @@ async def add_roadmap_milestone(project_id: str, payload: MilestoneCreate, user=
 
     await projects.update_one(
         {"_id": project["_id"]},
-        {"$set": {"roadmap": roadmap, "updated_at": datetime.utcnow()}},
+        {"$set": {"roadmap": roadmap, "updated_at": datetime.utcnow(), "updated_by": user.get("email")}},
     )
     await _log_activity(project_id, "milestone_added", f"Milestone '{payload.name}' added", user)
     return {"status": "Milestone added", "milestone": _serialize(milestone)}
@@ -643,7 +796,7 @@ async def update_roadmap_milestone(
     roadmap["milestones"] = milestones
     await projects.update_one(
         {"_id": project["_id"]},
-        {"$set": {"roadmap": roadmap, "updated_at": datetime.utcnow()}},
+        {"$set": {"roadmap": roadmap, "updated_at": datetime.utcnow(), "updated_by": user.get("email")}},
     )
 
     await _log_activity(
@@ -680,7 +833,7 @@ async def update_project_repository(project_id: str, payload: RepositoryUpdate, 
     }
     await projects.update_one(
         {"_id": project["_id"]},
-        {"$set": {"repository": repository, "updated_at": datetime.utcnow()}},
+        {"$set": {"repository": repository, "updated_at": datetime.utcnow(), "updated_by": user.get("email")}},
     )
     await _log_activity(project_id, "repository_updated", "Repository settings updated", user, repository)
     return {"status": "Repository updated", "repository": _serialize(repository)}

@@ -60,6 +60,7 @@ export default function TeamMemberDashboard({ onNavigateToChat, onNavigateToKanb
     scheduled_start_time: "",
     scheduled_end_time: "",
     estimated_time: "",
+    assigned_to: [] as string[],
     dependencies: [] as string[]
   });
 
@@ -78,7 +79,6 @@ export default function TeamMemberDashboard({ onNavigateToChat, onNavigateToKanb
       fetchUserTasks();
       fetchAllUsers();
       fetchProjects();
-      fetchTaggedTasks();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, user?.email]);
@@ -112,10 +112,12 @@ export default function TeamMemberDashboard({ onNavigateToChat, onNavigateToKanb
       const response = await api.get("/reports/user-tasks", {
         headers: { Authorization: `Bearer ${token}` }
       });
+
+      const tasks: TaskType[] = response.data || [];
       
       // Group tasks by date
       const grouped: Record<string, TaskType[]> = {};
-      response.data.forEach((task: TaskType) => {
+      tasks.forEach((task: TaskType) => {
         const date = task.task_date || "No Date";
         if (!grouped[date]) {
           grouped[date] = [];
@@ -136,26 +138,13 @@ export default function TeamMemberDashboard({ onNavigateToChat, onNavigateToKanb
         });
       
       setTasksByDate(sorted);
-    } catch (err) {
-      console.error("Failed to fetch tasks:", err);
-    }
-  };
 
-  const fetchTaggedTasks = async () => {
-    try {
-      // Fetch all tasks in the system to find ones where user is tagged
-      const response = await api.get("/reports/all-tasks", {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      
-      // Filter for tasks where current user is tagged as dependency
-      const tagged = response.data.filter((task: TaskType) =>
-        task.dependencies?.includes(user?.email || "")
+      const tagged = tasks.filter((task) =>
+        (task.dependencies || []).includes(user?.email || "")
       );
-      
       setTaggedTasks(tagged);
     } catch (err) {
-      console.error("Failed to fetch tagged tasks:", err);
+      console.error("Failed to fetch tasks:", err);
     }
   };
 
@@ -170,7 +159,6 @@ export default function TeamMemberDashboard({ onNavigateToChat, onNavigateToKanb
         headers: { Authorization: `Bearer ${token}` }
       });
       setSuccessMessage("Dependency marked as resolved!");
-      fetchTaggedTasks();
       fetchUserTasks();
       setTimeout(() => setSuccessMessage(""), 3000);
     } catch (err: unknown) {
@@ -205,11 +193,11 @@ export default function TeamMemberDashboard({ onNavigateToChat, onNavigateToKanb
         scheduled_start_time: "",
         scheduled_end_time: "",
         estimated_time: "",
+        assigned_to: [],
         dependencies: []
       });
       setShowTaskForm(false);
       fetchUserTasks();
-      fetchTaggedTasks();
     } catch (err: unknown) {
       const error = err as { response?: { data?: { detail?: string } } };
       setTaskError(error.response?.data?.detail || "Failed to submit task");
@@ -247,6 +235,23 @@ export default function TeamMemberDashboard({ onNavigateToChat, onNavigateToKanb
       setLoading(false);
     }
   };
+
+  const todayKey = new Date().toISOString().split('T')[0];
+  const allTasks = Object.values(tasksByDate).flat();
+  const todayTasks = tasksByDate[todayKey] || [];
+  const completedTodayCount = todayTasks.filter((task) => task.status === "Done").length;
+  const inProgressTodayCount = todayTasks.filter((task) => task.status === "In Progress").length;
+  const toDoTodayCount = todayTasks.filter((task) => task.status === "To Do").length;
+  const openHighPriorityCount = allTasks.filter(
+    (task) => (task.priority === "High" || task.priority === "Critical") && task.status !== "Done"
+  ).length;
+  const recentTasks = [...allTasks]
+    .sort((a, b) => {
+      const dateA = new Date(a.created_at || a.task_date).getTime();
+      const dateB = new Date(b.created_at || b.task_date).getTime();
+      return dateB - dateA;
+    })
+    .slice(0, 5);
 
   return (
     <div style={{ padding: 40 }}>
@@ -431,11 +436,6 @@ export default function TeamMemberDashboard({ onNavigateToChat, onNavigateToKanb
         </div>
 
         <div style={{ flex: 1 }}>
-          <div style={{ backgroundColor: "#f0f0f0", padding: 20, borderRadius: 8, marginBottom: 30 }}>
-          <h2>Account Information</h2>
-          <p><strong>Email:</strong> {user?.email}</p>
-          <p><strong>Role:</strong> {user?.role}</p>
-        </div>
 
       {/* Home View */}
       {currentView === 'home' && (
@@ -446,139 +446,292 @@ export default function TeamMemberDashboard({ onNavigateToChat, onNavigateToKanb
             </div>
           )}
 
-          <div style={{ marginBottom: 30 }}>
-            <h2>📅 Today's Tasks (Daily Stand-up)</h2>
-        <button
-          onClick={() => setShowTaskForm(!showTaskForm)}
-          style={{ padding: 10, backgroundColor: "#007bff", color: "white", border: "none", borderRadius: 4, cursor: "pointer", marginBottom: 15 }}
-        >
-          {showTaskForm ? "Cancel" : "+ Add Daily Task"}
-        </button>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
+            <button
+              onClick={() => setShowTaskForm(!showTaskForm)}
+              style={{
+                padding: "10px 16px",
+                backgroundColor: showTaskForm ? "#9ca3af" : "#1f6feb",
+                color: "white",
+                border: "none",
+                borderRadius: 8,
+                cursor: "pointer",
+                fontWeight: 600
+              }}
+            >
+              {showTaskForm ? "Hide Task Form" : "+ Add Daily Task"}
+            </button>
+            <button
+              onClick={() => setShowMOMForm(!showMOMForm)}
+              style={{
+                padding: "10px 16px",
+                backgroundColor: showMOMForm ? "#94a3b8" : "#0f9fb8",
+                color: "white",
+                border: "none",
+                borderRadius: 8,
+                cursor: "pointer",
+                fontWeight: 600
+              }}
+            >
+              {showMOMForm ? "Hide MOM Form" : "+ Submit MOM"}
+            </button>
+          </div>
 
-        {showTaskForm && (
-          <div style={{ border: "1px solid #ddd", padding: 20, borderRadius: 8, marginBottom: 15, backgroundColor: "#f9f9f9" }}>
-            <h3>Submit Daily Stand-up Task</h3>
-            <select
-              value={taskForm.project_id}
-              onChange={(e) => setTaskForm({ ...taskForm, project_id: e.target.value })}
-              style={{ width: "100%", padding: 8, marginBottom: 10, borderRadius: 4, border: "1px solid #ddd" }}
-            >
-              <option value="">-- Select Project --</option>
-              {projects.length > 0 ? (
-                projects.map((project) => (
-                  <option key={project.id} value={project.id}>
-                    {project.name}
-                  </option>
-                ))
-              ) : (
-                <option disabled>No projects available</option>
-              )}
-            </select>
-            <input
-              type="text"
-              placeholder="Task Title"
-              value={taskForm.title}
-              onChange={(e) => setTaskForm({ ...taskForm, title: e.target.value })}
-              style={{ width: "100%", padding: 8, marginBottom: 10, borderRadius: 4, border: "1px solid #ddd" }}
-            />
-            <textarea
-              placeholder="Task Description"
-              value={taskForm.description}
-              onChange={(e) => setTaskForm({ ...taskForm, description: e.target.value })}
-              style={{ width: "100%", padding: 8, marginBottom: 10, borderRadius: 4, border: "1px solid #ddd", minHeight: 80 }}
-            />
-            <input
-              type="date"
-              value={taskForm.task_date}
-              onChange={(e) => setTaskForm({ ...taskForm, task_date: e.target.value })}
-              style={{ width: "100%", padding: 8, marginBottom: 10, borderRadius: 4, border: "1px solid #ddd" }}
-            />
-            <label style={{ display: "block", marginBottom: 5, fontWeight: "bold", fontSize: 14 }}>
-              ⏰ Start Time (Optional)
-            </label>
-            <input
-              type="time"
-              value={taskForm.scheduled_start_time}
-              onChange={(e) => setTaskForm({ ...taskForm, scheduled_start_time: e.target.value })}
-              style={{ width: "100%", padding: 8, marginBottom: 10, borderRadius: 4, border: "1px solid #ddd", fontSize: 14 }}
-            />
-            <label style={{ display: "block", marginBottom: 5, fontWeight: "bold", fontSize: 14 }}>
-              ⏰ End Time (Optional)
-            </label>
-            <input
-              type="time"
-              value={taskForm.scheduled_end_time}
-              onChange={(e) => setTaskForm({ ...taskForm, scheduled_end_time: e.target.value })}
-              style={{ width: "100%", padding: 8, marginBottom: 10, borderRadius: 4, border: "1px solid #ddd", fontSize: 14 }}
-            />
-            <input
-              type="number"
-              placeholder="Estimated Time (hours)"
-              value={taskForm.estimated_time}
-              onChange={(e) => setTaskForm({ ...taskForm, estimated_time: e.target.value })}
-              style={{ width: "100%", padding: 8, marginBottom: 10, borderRadius: 4, border: "1px solid #ddd" }}
-            />
-            <select
-              value={taskForm.status}
-              onChange={(e) => setTaskForm({ ...taskForm, status: e.target.value })}
-              style={{ width: "100%", padding: 8, marginBottom: 10, borderRadius: 4, border: "1px solid #ddd" }}
-            >
-              <option value="To Do">To Do</option>
-              <option value="In Progress">In Progress</option>
-              <option value="Done">Done</option>
-            </select>
-            <select
-              value={taskForm.priority}
-              onChange={(e) => setTaskForm({ ...taskForm, priority: e.target.value })}
-              style={{ width: "100%", padding: 8, marginBottom: 10, borderRadius: 4, border: "1px solid #ddd" }}
-            >
-              <option value="Low">Low Priority</option>
-              <option value="Medium">Medium Priority</option>
-              <option value="High">High Priority</option>
-            </select>
-
-            <div style={{ marginBottom: 10 }}>
-              <label style={{ display: "block", marginBottom: 8, fontWeight: "bold" }}>
-                🏷️ Tag Team Members
-              </label>
-              <p style={{ marginTop: 0, marginBottom: 10, color: "#666", fontSize: 12 }}>
-                Select team members to notify about this task
-              </p>
-              <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 200, overflowY: "auto", border: "1px solid #ddd", padding: 10, borderRadius: 4, backgroundColor: "#fafafa" }}>
-                {allUsers.length === 0 ? (
-                  <p style={{ color: "#999", margin: 0 }}>No other team members available</p>
-                ) : (
-                  allUsers.map((member) => (
-                    <label key={member.id} style={{ display: "flex", alignItems: "center", cursor: "pointer" }}>
-                      <input
-                        type="checkbox"
-                        checked={taskForm.dependencies.includes(member.email)}
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            setTaskForm({ ...taskForm, dependencies: [...taskForm.dependencies, member.email] });
-                          } else {
-                            setTaskForm({ ...taskForm, dependencies: taskForm.dependencies.filter(email => email !== member.email) });
-                          }
-                        }}
-                        style={{ marginRight: 8 }}
-                      />
-                      <span style={{ fontSize: 14 }}>
-                        {member.email}
-                      </span>
-                    </label>
-                  ))
-                )}
+          <div
+            style={{
+              background: "linear-gradient(125deg, #f4f9ff 0%, #edf7f3 55%, #fff7ec 100%)",
+              border: "1px solid #dbe6f2",
+              borderRadius: 16,
+              padding: 20,
+              marginBottom: 22
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap", marginBottom: 16 }}>
+              <div>
+                <h2 style={{ margin: 0, color: "#102a43", fontSize: 30, letterSpacing: 0.2 }}>Team Member Workspace</h2>
+                <p style={{ margin: "6px 0 0", color: "#486581", fontSize: 14 }}>
+                  Track daily delivery, resolve dependencies faster, and keep momentum visible.
+                </p>
+              </div>
+              <div style={{ padding: "8px 12px", backgroundColor: "#ffffffb3", border: "1px solid #d9e7f2", borderRadius: 999, color: "#334e68", fontSize: 13, fontWeight: 600 }}>
+                {user?.email}
               </div>
             </div>
 
-            {taskError && <p style={{ color: "red", marginBottom: 10 }}>{taskError}</p>}
-            <button
-              onClick={handleTaskSubmit}
-              disabled={loading}
-              style={{ padding: 10, backgroundColor: "#28a745", color: "white", border: "none", borderRadius: 4, cursor: "pointer" }}
-            >
-              {loading ? "Submitting..." : "Submit Task"}
-            </button>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12, marginBottom: 16 }}>
+              <div style={{ backgroundColor: "#ffffff", border: "1px solid #e6edf5", borderRadius: 12, padding: 14 }}>
+                <div style={{ color: "#627d98", fontSize: 13 }}>Today&apos;s Tasks</div>
+                <div style={{ color: "#102a43", fontSize: 28, fontWeight: 700, marginTop: 4 }}>{todayTasks.length}</div>
+              </div>
+              <div style={{ backgroundColor: "#ffffff", border: "1px solid #e6edf5", borderRadius: 12, padding: 14 }}>
+                <div style={{ color: "#627d98", fontSize: 13 }}>In Progress</div>
+                <div style={{ color: "#1769aa", fontSize: 28, fontWeight: 700, marginTop: 4 }}>{inProgressTodayCount}</div>
+              </div>
+              <div style={{ backgroundColor: "#ffffff", border: "1px solid #e6edf5", borderRadius: 12, padding: 14 }}>
+                <div style={{ color: "#627d98", fontSize: 13 }}>Completed Today</div>
+                <div style={{ color: "#2f855a", fontSize: 28, fontWeight: 700, marginTop: 4 }}>{completedTodayCount}</div>
+              </div>
+              <div style={{ backgroundColor: "#ffffff", border: "1px solid #e6edf5", borderRadius: 12, padding: 14 }}>
+                <div style={{ color: "#627d98", fontSize: 13 }}>High Priority Open</div>
+                <div style={{ color: "#b42318", fontSize: 28, fontWeight: 700, marginTop: 4 }}>{openHighPriorityCount}</div>
+              </div>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 12 }}>
+              <div style={{ backgroundColor: "#ffffff", border: "1px solid #e6edf5", borderRadius: 12, padding: 14 }}>
+                <h3 style={{ margin: "0 0 10px", color: "#102a43", fontSize: 18 }}>Recent Activity</h3>
+                {recentTasks.length === 0 ? (
+                  <p style={{ margin: 0, color: "#829ab1", fontSize: 14 }}>No task activity yet. Start by creating your first daily task.</p>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {recentTasks.map((task) => (
+                      <button
+                        key={task.id}
+                        onClick={() => setSelectedTaskId(task.id)}
+                        style={{
+                          backgroundColor: "#f8fbff",
+                          border: "1px solid #dce9f5",
+                          borderRadius: 10,
+                          padding: "10px 12px",
+                          textAlign: "left",
+                          cursor: "pointer"
+                        }}
+                      >
+                        <div style={{ color: "#102a43", fontWeight: 600, fontSize: 14 }}>{task.title}</div>
+                        <div style={{ color: "#627d98", fontSize: 12, marginTop: 4 }}>
+                          {task.status} • {task.priority} • {new Date(task.task_date).toLocaleDateString()}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div style={{ backgroundColor: "#ffffff", border: "1px solid #e6edf5", borderRadius: 12, padding: 14 }}>
+                <h3 style={{ margin: "0 0 10px", color: "#102a43", fontSize: 18 }}>Quick Actions</h3>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  <button
+                    onClick={() => setShowTaskForm(true)}
+                    style={{ backgroundColor: "#1f6feb", color: "white", border: "none", borderRadius: 9, padding: "10px 12px", cursor: "pointer", fontWeight: 600, textAlign: "left" }}
+                  >
+                    + New Daily Task
+                  </button>
+                  <button
+                    onClick={() => setCurrentView('dependencies')}
+                    style={{ backgroundColor: "#fef3c7", color: "#92400e", border: "1px solid #fde68a", borderRadius: 9, padding: "10px 12px", cursor: "pointer", fontWeight: 600, textAlign: "left" }}
+                  >
+                    Review Dependencies ({getTaggedTasks().length})
+                  </button>
+                  <button
+                    onClick={() => setCurrentView('dependency-status')}
+                    style={{ backgroundColor: "#eff6ff", color: "#1e40af", border: "1px solid #bfdbfe", borderRadius: 9, padding: "10px 12px", cursor: "pointer", fontWeight: 600, textAlign: "left" }}
+                  >
+                    Check Dependency Status
+                  </button>
+                  <button
+                    onClick={() => setShowMOMForm(true)}
+                    style={{ backgroundColor: "#ecfdf3", color: "#027a48", border: "1px solid #a6f4c5", borderRadius: 9, padding: "10px 12px", cursor: "pointer", fontWeight: 600, textAlign: "left" }}
+                  >
+                    Submit MOM Notes
+                  </button>
+                </div>
+                <p style={{ margin: "10px 0 0", fontSize: 12, color: "#829ab1" }}>
+                  To-Do today: {toDoTodayCount}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div style={{ marginBottom: 30 }}>
+        {showTaskForm && (
+          <div style={{ marginBottom: 22 }}>
+            <div style={{ color: "#667085", fontSize: 14, marginBottom: 8 }}>Dashboard &gt; Tasks &gt; Create</div>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap", marginBottom: 14 }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: 32, color: "#0f172a" }}>Create Task</h3>
+                <p style={{ margin: "4px 0 0", color: "#475467", fontSize: 16 }}>Log your daily stand-up progress</p>
+              </div>
+              <div style={{ display: "flex", gap: 10 }}>
+                <button
+                  onClick={() => setShowTaskForm(false)}
+                  style={{ padding: "10px 16px", backgroundColor: "#f8fafc", color: "#475467", border: "1px solid #d0d5dd", borderRadius: 8, cursor: "pointer", fontWeight: 600 }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleTaskSubmit}
+                  disabled={loading}
+                  style={{ padding: "10px 16px", backgroundColor: "#2f6fed", color: "white", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 700 }}
+                >
+                  {loading ? "Creating..." : "Create Task"}
+                </button>
+              </div>
+            </div>
+
+            <div style={{ border: "1px solid #d0d5dd", borderRadius: 12, backgroundColor: "#ffffff", padding: 18 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", gap: 22 }}>
+                <div>
+                  <h4 style={{ marginTop: 0, marginBottom: 14, color: "#0f172a", fontSize: 26 }}>Task Details</h4>
+
+                  <label style={{ display: "block", marginBottom: 6, fontWeight: 600, color: "#344054" }}>Project</label>
+                  <select
+                    value={taskForm.project_id}
+                    onChange={(e) => setTaskForm({ ...taskForm, project_id: e.target.value })}
+                    style={{ width: "100%", padding: "10px 12px", marginBottom: 12, borderRadius: 8, border: "1px solid #d0d5dd" }}
+                  >
+                    <option value="">- Select Project -</option>
+                    {projects.length > 0 ? (
+                      projects.map((project) => (
+                        <option key={project.id} value={project.id}>
+                          {project.name}
+                        </option>
+                      ))
+                    ) : (
+                      <option disabled>No projects available</option>
+                    )}
+                  </select>
+
+                  <label style={{ display: "block", marginBottom: 6, fontWeight: 600, color: "#344054" }}>Task Title <span style={{ color: "#ef4444" }}>*</span></label>
+                  <input
+                    type="text"
+                    placeholder="Title"
+                    value={taskForm.title}
+                    onChange={(e) => setTaskForm({ ...taskForm, title: e.target.value })}
+                    style={{ width: "100%", padding: "10px 12px", marginBottom: 12, borderRadius: 8, border: "1px solid #d0d5dd", boxSizing: "border-box" }}
+                  />
+
+                  <label style={{ display: "block", marginBottom: 6, fontWeight: 600, color: "#344054" }}>Description</label>
+                  <textarea
+                    placeholder="e.g. API integration for payment module"
+                    value={taskForm.description}
+                    onChange={(e) => setTaskForm({ ...taskForm, description: e.target.value })}
+                    style={{ width: "100%", padding: "10px 12px", marginBottom: 12, borderRadius: 8, border: "1px solid #d0d5dd", minHeight: 110, boxSizing: "border-box", resize: "vertical" }}
+                  />
+
+
+                </div>
+
+                <div style={{ borderLeft: "1px solid #eaecf0", paddingLeft: 20 }}>
+                  <h4 style={{ marginTop: 0, marginBottom: 14, color: "#0f172a", fontSize: 22 }}>Time &amp; Effort</h4>
+
+                  <label style={{ display: "block", marginBottom: 6, fontWeight: 600, color: "#344054" }}>Date</label>
+                  <input
+                    type="date"
+                    value={taskForm.task_date}
+                    onChange={(e) => setTaskForm({ ...taskForm, task_date: e.target.value })}
+                    style={{ width: "100%", padding: "10px 12px", marginBottom: 12, borderRadius: 8, border: "1px solid #d0d5dd" }}
+                  />
+
+                  <label style={{ display: "block", marginBottom: 6, fontWeight: 600, color: "#344054" }}>Start Time</label>
+                  <input
+                    type="time"
+                    value={taskForm.scheduled_start_time}
+                    onChange={(e) => setTaskForm({ ...taskForm, scheduled_start_time: e.target.value })}
+                    style={{ width: "100%", padding: "10px 12px", marginBottom: 12, borderRadius: 8, border: "1px solid #d0d5dd" }}
+                  />
+
+                  <label style={{ display: "block", marginBottom: 6, fontWeight: 600, color: "#344054" }}>End Time</label>
+                  <input
+                    type="time"
+                    value={taskForm.scheduled_end_time}
+                    onChange={(e) => setTaskForm({ ...taskForm, scheduled_end_time: e.target.value })}
+                    style={{ width: "100%", padding: "10px 12px", marginBottom: 12, borderRadius: 8, border: "1px solid #d0d5dd" }}
+                  />
+
+                  <label style={{ display: "block", marginBottom: 6, fontWeight: 600, color: "#344054" }}>Estimated Time (hours)</label>
+                  <input
+                    type="number"
+                    placeholder="Estimated automatically"
+                    value={taskForm.estimated_time}
+                    onChange={(e) => setTaskForm({ ...taskForm, estimated_time: e.target.value })}
+                    style={{ width: "100%", padding: "10px 12px", marginBottom: 12, borderRadius: 8, border: "1px solid #d0d5dd" }}
+                  />
+                </div>
+
+                <div style={{ borderLeft: "1px solid #eaecf0", paddingLeft: 20 }}>
+                  <h4 style={{ marginTop: 0, marginBottom: 14, color: "#0f172a", fontSize: 22 }}>Task Properties</h4>
+
+                  <label style={{ display: "block", marginBottom: 6, fontWeight: 600, color: "#344054" }}>Status</label>
+                  <select
+                    value={taskForm.status}
+                    onChange={(e) => setTaskForm({ ...taskForm, status: e.target.value })}
+                    style={{ width: "100%", padding: "10px 12px", marginBottom: 12, borderRadius: 8, border: "1px solid #d0d5dd" }}
+                  >
+                    <option value="To Do">To Do</option>
+                    <option value="In Progress">In Progress</option>
+                    <option value="Done">Done</option>
+                  </select>
+
+                  <label style={{ display: "block", marginBottom: 6, fontWeight: 600, color: "#344054" }}>Priority</label>
+                  <select
+                    value={taskForm.priority}
+                    onChange={(e) => setTaskForm({ ...taskForm, priority: e.target.value })}
+                    style={{ width: "100%", padding: "10px 12px", marginBottom: 16, borderRadius: 8, border: "1px solid #d0d5dd" }}
+                  >
+                    <option value="Low">Low</option>
+                    <option value="Medium">Medium</option>
+                    <option value="High">High</option>
+                    <option value="Critical">Critical</option>
+                  </select>
+
+                  <h4 style={{ marginTop: 8, marginBottom: 10, color: "#0f172a", fontSize: 22 }}>Team Assignment</h4>
+                  <label style={{ display: "block", marginBottom: 6, fontWeight: 600, color: "#344054" }}>Assign To <span style={{ color: "#ef4444" }}>*</span></label>
+                  <select
+                    value={taskForm.assigned_to[0] || ""}
+                    onChange={(e) => setTaskForm({ ...taskForm, assigned_to: e.target.value ? [e.target.value] : [] })}
+                    style={{ width: "100%", padding: "10px 12px", marginBottom: 12, borderRadius: 8, border: "1px solid #d0d5dd" }}
+                  >
+                    <option value="">Select team member</option>
+                    {user?.email && <option value={user.email}>{user.email} (You)</option>}
+                    {allUsers.map((member) => (
+                      <option key={member.id} value={member.email}>{member.email}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {taskError && <p style={{ color: "#dc2626", marginTop: 12, marginBottom: 0 }}>{taskError}</p>}
+            </div>
           </div>
         )}
 
@@ -656,13 +809,6 @@ export default function TeamMemberDashboard({ onNavigateToChat, onNavigateToKanb
       </div>
 
       <div style={{ marginBottom: 30 }}>
-        <h2>📝 Minutes of Meeting (MOM)</h2>
-        <button
-          onClick={() => setShowMOMForm(!showMOMForm)}
-          style={{ padding: 10, backgroundColor: "#17a2b8", color: "white", border: "none", borderRadius: 4, cursor: "pointer", marginBottom: 15 }}
-        >
-          {showMOMForm ? "Cancel" : "+ Submit MOM"}
-        </button>
 
         {showMOMForm && (
           <div style={{ border: "1px solid #ddd", padding: 20, borderRadius: 8, marginBottom: 15, backgroundColor: "#f9f9f9" }}>
