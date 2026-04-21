@@ -1,8 +1,11 @@
 import { useState, useContext } from "react";
 import { AuthContext } from "../context/AuthContext";
+import "./Login.css";
 
-export default function Register({ switchToLogin }: any) {
+export default function Register({ switchToLogin }: { switchToLogin: () => void }) {
   const { register } = useContext(AuthContext);
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [role, setRole] = useState("team_member");
@@ -13,53 +16,104 @@ export default function Register({ switchToLogin }: any) {
     try {
       setError("");
       setLoading(true);
-      await register(email, password, role);
+      const fullName = `${firstName} ${lastName}`.trim();
+      await register(email, password, role, fullName || undefined);
       alert("Registration successful. Please login.");
       switchToLogin();
-    } catch (err: any) {
-      setError(err.response?.data?.detail || "Registration failed");
+    } catch (err: unknown) {
+      const error = err as { response?: { data?: { detail?: string } } };
+      setError(error.response?.data?.detail || "Registration failed");
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div>
-      <h2>Register</h2>
+    <div className="auth-minimal">
+      <div className="auth-box">
+        <div className="auth-logo">P</div>
+        <p className="eyebrow">Workspace Onboarding</p>
+        <h1>Create account</h1>
+        <p className="sub">Fill your details to get started in your workspace.</p>
+        <div className="auth-role-tags">
+          <span>Admin</span>
+          <span>User</span>
+        </div>
 
-      <input
-        placeholder="Email"
-        value={email}
-        onChange={(e) => setEmail(e.target.value)}
-      />
-      <br /><br />
+        <div className="auth-grid-two">
+          <div>
+            <label className="field-label" htmlFor="first-name">First name</label>
+            <input
+              id="first-name"
+              className="text-input"
+              placeholder="First name"
+              value={firstName}
+              onChange={(e) => setFirstName(e.target.value)}
+              autoComplete="given-name"
+            />
+          </div>
+          <div>
+            <label className="field-label" htmlFor="last-name">Last name</label>
+            <input
+              id="last-name"
+              className="text-input"
+              placeholder="Last name"
+              value={lastName}
+              onChange={(e) => setLastName(e.target.value)}
+              autoComplete="family-name"
+            />
+          </div>
+        </div>
 
-      <input
-        type="password"
-        placeholder="Password"
-        value={password}
-        onChange={(e) => setPassword(e.target.value)}
-      />
-      <br /><br />
+        <label className="field-label" htmlFor="email">Email</label>
+        <input
+          id="email"
+          className="text-input"
+          placeholder="you@company.com"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          autoComplete="email"
+        />
 
-      <label htmlFor="role">Select Role:</label>
-      <br />
-      <select value={role} onChange={(e) => setRole(e.target.value)} style={{ padding: 8, marginTop: 10 }}>
-        <option value="team_member">Team Member</option>
-        <option value="project_manager">Project Manager</option>
-      </select>
-      <br /><br />
+        <label className="field-label" htmlFor="password">Password</label>
+        <input
+          id="password"
+          className="text-input"
+          type="password"
+          placeholder="Enter your password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          autoComplete="new-password"
+        />
 
-      {error && <p style={{ color: "red" }}>{error}</p>}
+        <label className="field-label">Role</label>
+        <div className="role-switch">
+          <button
+            type="button"
+            className={`role-btn ${role === "admin" ? "active" : ""}`}
+            onClick={() => setRole("admin")}
+          >
+            Admin
+          </button>
+          <button
+            type="button"
+            className={`role-btn ${role === "team_member" ? "active" : ""}`}
+            onClick={() => setRole("team_member")}
+          >
+            Team Member
+          </button>
+        </div>
 
-      <button onClick={submit} disabled={loading}>
-        {loading ? "Registering..." : "Register"}
-      </button>
+        {error && <div className="error-banner">{error}</div>}
 
-      <p>
-        Already have an account?{" "}
-        <button onClick={switchToLogin}>Login</button>
-      </p>
+        <button className="primary-btn" type="button" onClick={submit} disabled={loading}>
+          {loading ? "Creating account..." : "Continue"}
+        </button>
+
+        <p className="helper-text">
+          Already have an account? <button className="ghost-link" type="button" onClick={switchToLogin}>Login</button>
+        </p>
+      </div>
     </div>
   );
 }

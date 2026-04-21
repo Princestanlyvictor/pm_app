@@ -5,9 +5,120 @@ from bson import ObjectId
 from typing import List, Optional
 
 from app.deps import get_current_user
-from app.db import reports, users
+from app.db import project_activities, projects, reports, users
+from app.rbac import (
+    append_audit_log,
+    build_task_query_for_user,
+    can_access_project,
+    is_privileged_role,
+    require_task_view_access,
+    validate_task_assignment,
+)
 
 router = APIRouter(prefix="/reports", tags=["reports"])
+
+
+async def _log_task_activity(project_id: str, action: str, message: str, user: dict, metadata: Optional[dict] = None):
+    await project_activities.insert_one(
+        {
+            "project_id": project_id,
+            "action": action,
+            "message": message,
+            "actor_email": user.get("email"),
+            "actor_role": user.get("role"),
+            "metadata": metadata or {},
+            "created_at": datetime.utcnow(),
+        }
+    )
+
+
+async def _get_project_or_404(project_id: str) -> dict:
+    try:
+        object_id = ObjectId(project_id)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid project ID") from exc
+
+    project = await projects.find_one({"_id": object_id})
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return project
+
+
+def _can_manage_task(task: dict, user: dict) -> bool:
+    if is_privileged_role(user.get("role")):
+        return True
+
+    user_email = str(user.get("email") or "").strip().lower()
+    assigned_to = task.get("assigned_to") or []
+    if isinstance(assigned_to, str):
+        assigned_to = [assigned_to]
+    normalized_assignees = {str(email or "").strip().lower() for email in assigned_to if str(email or "").strip()}
+
+    return user_email in normalized_assignees
+
+
+def _to_minutes(value: str) -> int:
+    parts = str(value or "").split(":")
+    if len(parts) != 2:
+        raise ValueError("Time must be in HH:MM format")
+    hours = int(parts[0])
+    minutes = int(parts[1])
+    if hours < 0 or hours > 23 or minutes < 0 or minutes > 59:
+        raise ValueError("Invalid time value")
+    return (hours * 60) + minutes
+
+
+def _has_overlap(start_a: int, end_a: int, start_b: int, end_b: int) -> bool:
+    return max(start_a, start_b) < min(end_a, end_b)
+
+
+async def _validate_task_schedule(
+    *,
+    project_id: str,
+    assignees: List[str],
+    task_date: str,
+    start_time: Optional[str],
+    end_time: Optional[str],
+    exclude_task_id: Optional[str] = None,
+):
+    if not start_time and not end_time:
+        return
+
+    if not start_time or not end_time:
+        raise HTTPException(status_code=400, detail="Both start time and end time are required")
+
+    try:
+        start_minutes = _to_minutes(start_time)
+        end_minutes = _to_minutes(end_time)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if end_minutes <= start_minutes:
+        raise HTTPException(status_code=400, detail="End time must be greater than start time")
+
+    query = {
+        "type": "TASK",
+        "project_id": project_id,
+        "task_date": task_date,
+        "assigned_to": {"$in": assignees},
+        "scheduled_start_time": {"$exists": True, "$ne": None},
+        "scheduled_end_time": {"$exists": True, "$ne": None},
+    }
+    if exclude_task_id:
+        query["_id"] = {"$ne": ObjectId(exclude_task_id)}
+
+    existing_tasks = await reports.find(query).to_list(None)
+    for existing in existing_tasks:
+        try:
+            existing_start = _to_minutes(existing.get("scheduled_start_time"))
+            existing_end = _to_minutes(existing.get("scheduled_end_time"))
+        except Exception:
+            continue
+        if _has_overlap(start_minutes, end_minutes, existing_start, existing_end):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Time overlap with existing task '{existing.get('title', 'Untitled')}'",
+            )
 
 
 class MOMRequest(BaseModel):
@@ -22,10 +133,17 @@ class TaskRequest(BaseModel):
     description: str
     status: str = "To Do"  # To Do, In Progress, Done
     priority: str = "Medium"  # Low, Medium, High
+    stage: Optional[str] = None
     task_date: str  # YYYY-MM-DD format
+    due_date: Optional[str] = None
     scheduled_start_time: Optional[str] = None  # Start time HH:MM format (00:00 - 23:59)
     scheduled_end_time: Optional[str] = None  # End time HH:MM format (00:00 - 23:59)
-    estimated_time: Optional[int] = None  # in hours
+    estimated_time: Optional[float] = None  # in hours
+    actual_time: Optional[float] = None  # in hours
+    is_break: Optional[bool] = False
+    blockers: Optional[str] = None
+    support_required: Optional[str] = None
+    dependencies_note: Optional[str] = None
     dependencies: Optional[List[str]] = None  # list of tagged user emails
     assigned_to: Optional[List[str]] = None  # list of user emails
 
@@ -35,7 +153,17 @@ class TaskUpdateRequest(BaseModel):
     description: Optional[str] = None
     status: Optional[str] = None
     priority: Optional[str] = None
-    estimated_time: Optional[int] = None
+    stage: Optional[str] = None
+    task_date: Optional[str] = None
+    due_date: Optional[str] = None
+    scheduled_start_time: Optional[str] = None
+    scheduled_end_time: Optional[str] = None
+    estimated_time: Optional[float] = None
+    actual_time: Optional[float] = None
+    is_break: Optional[bool] = None
+    blockers: Optional[str] = None
+    support_required: Optional[str] = None
+    dependencies_note: Optional[str] = None
     dependencies: Optional[List[str]] = None
     assigned_to: Optional[List[str]] = None
 
@@ -47,6 +175,10 @@ class ChatRequest(BaseModel):
 
 @router.post("/mom")
 async def create_mom(payload: MOMRequest, user=Depends(get_current_user)):
+    project = await _get_project_or_404(payload.project_id)
+    if not can_access_project(project, user):
+        raise HTTPException(status_code=403, detail="You do not have access to this project")
+
     doc = {
         "type": "MOM",
         "project_id": payload.project_id,
@@ -62,6 +194,36 @@ async def create_mom(payload: MOMRequest, user=Depends(get_current_user)):
 
 @router.post("/task")
 async def create_task(payload: TaskRequest, user=Depends(get_current_user)):
+    project = await _get_project_or_404(payload.project_id)
+    if not can_access_project(project, user):
+        raise HTTPException(status_code=403, detail="You do not have access to this project")
+
+    requested_assignees = payload.assigned_to or [str(user.get("email") or "").strip().lower()]
+    assigned_to = await validate_task_assignment(project, requested_assignees)
+
+    await _validate_task_schedule(
+        project_id=payload.project_id,
+        assignees=assigned_to,
+        task_date=payload.task_date,
+        start_time=payload.scheduled_start_time,
+        end_time=payload.scheduled_end_time,
+    )
+
+    derived_estimated_time = payload.estimated_time
+    if payload.scheduled_start_time and payload.scheduled_end_time:
+        start_minutes = _to_minutes(payload.scheduled_start_time)
+        end_minutes = _to_minutes(payload.scheduled_end_time)
+        derived_estimated_time = round((end_minutes - start_minutes) / 60, 2)
+
+    if str(payload.status or "").strip().lower() in ["done", "completed"] and payload.actual_time is None:
+        raise HTTPException(status_code=400, detail="Actual time is required when task is completed")
+
+    stage_value = payload.stage
+    if not stage_value:
+        default_stages = (project.get("roadmap") or {}).get("stages", [])
+        if default_stages:
+            stage_value = default_stages[0].get("name")
+
     doc = {
         "type": "TASK",
         "project_id": payload.project_id,
@@ -69,27 +231,70 @@ async def create_task(payload: TaskRequest, user=Depends(get_current_user)):
         "description": payload.description,
         "status": payload.status,
         "priority": payload.priority,
+        "stage": stage_value,
         "task_date": payload.task_date,
+        "due_date": payload.due_date or payload.task_date,
         "scheduled_start_time": payload.scheduled_start_time,  # Store start time HH:MM
         "scheduled_end_time": payload.scheduled_end_time,      # Store end time HH:MM
-        "estimated_time": payload.estimated_time,
+        "estimated_time": derived_estimated_time,
+        "actual_time": payload.actual_time,
+        "is_break": bool(payload.is_break),
+        "blockers": payload.blockers or "",
+        "support_required": payload.support_required or "",
+        "dependencies_note": payload.dependencies_note or "",
         "dependencies": payload.dependencies or [],
         "resolved_dependencies": [],  # Track which dependencies have been resolved
-        "assigned_to": payload.assigned_to or [],
+        "assigned_to": assigned_to,
         "user_id": user["id"],
-        "user_email": user["email"],
-        "created_by": user["email"],
+        "user_email": str(user["email"]).strip().lower(),
+        "created_by": str(user["email"]).strip().lower(),
+        "updated_by": str(user["email"]).strip().lower(),
         "created_at": datetime.utcnow(),
         "updated_at": datetime.utcnow(),
         "chat": []
     }
     result = await reports.insert_one(doc)
+
+    await _log_task_activity(
+        payload.project_id,
+        "task_created",
+        f"Task '{payload.title}' created",
+        user,
+        {
+            "task_id": str(result.inserted_id),
+            "status": payload.status,
+            "priority": payload.priority,
+            "stage": stage_value,
+        },
+    )
+    await append_audit_log(
+        "task_created",
+        user,
+        "task",
+        str(result.inserted_id),
+        {"project_id": payload.project_id, "assigned_to": assigned_to},
+    )
+
     return {"id": str(result.inserted_id), "status": "Task submitted"}
 
 
 @router.put("/task/{task_id}")
 async def update_task(task_id: str, payload: TaskUpdateRequest, user=Depends(get_current_user)):
+    task = await reports.find_one({"_id": ObjectId(task_id)})
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    await require_task_view_access(task, user)
+    if not _can_manage_task(task, user):
+        raise HTTPException(status_code=403, detail="You do not have permission to update this task")
+
+    project = await _get_project_or_404(str(task.get("project_id")))
+
     update_data = {}
+    next_task_date = payload.task_date if payload.task_date is not None else task.get("task_date")
+    next_start_time = payload.scheduled_start_time if payload.scheduled_start_time is not None else task.get("scheduled_start_time")
+    next_end_time = payload.scheduled_end_time if payload.scheduled_end_time is not None else task.get("scheduled_end_time")
+    next_assignees = payload.assigned_to if payload.assigned_to is not None else (task.get("assigned_to") or [])
     
     if payload.title is not None:
         update_data["title"] = payload.title
@@ -99,28 +304,86 @@ async def update_task(task_id: str, payload: TaskUpdateRequest, user=Depends(get
         update_data["status"] = payload.status
     if payload.priority is not None:
         update_data["priority"] = payload.priority
+    if payload.stage is not None:
+        update_data["stage"] = payload.stage
+    if payload.task_date is not None:
+        update_data["task_date"] = payload.task_date
+    if payload.due_date is not None:
+        update_data["due_date"] = payload.due_date
+    if payload.scheduled_start_time is not None:
+        update_data["scheduled_start_time"] = payload.scheduled_start_time
+    if payload.scheduled_end_time is not None:
+        update_data["scheduled_end_time"] = payload.scheduled_end_time
     if payload.estimated_time is not None:
         update_data["estimated_time"] = payload.estimated_time
+    if payload.actual_time is not None:
+        update_data["actual_time"] = payload.actual_time
+    if payload.is_break is not None:
+        update_data["is_break"] = bool(payload.is_break)
+    if payload.blockers is not None:
+        update_data["blockers"] = payload.blockers
+    if payload.support_required is not None:
+        update_data["support_required"] = payload.support_required
+    if payload.dependencies_note is not None:
+        update_data["dependencies_note"] = payload.dependencies_note
     if payload.dependencies is not None:
         update_data["dependencies"] = payload.dependencies
     if payload.assigned_to is not None:
-        update_data["assigned_to"] = payload.assigned_to
-    
-    update_data["updated_at"] = datetime.utcnow()
-    
-    result = await reports.update_one(
-        {"_id": ObjectId(task_id)},
-        {"$set": update_data}
+        update_data["assigned_to"] = await validate_task_assignment(project, payload.assigned_to)
+        next_assignees = update_data["assigned_to"]
+
+    await _validate_task_schedule(
+        project_id=str(task.get("project_id")),
+        assignees=next_assignees,
+        task_date=next_task_date,
+        start_time=next_start_time,
+        end_time=next_end_time,
+        exclude_task_id=task_id,
     )
+
+    if next_start_time and next_end_time:
+        start_minutes = _to_minutes(next_start_time)
+        end_minutes = _to_minutes(next_end_time)
+        update_data["estimated_time"] = round((end_minutes - start_minutes) / 60, 2)
+
+    next_status = payload.status if payload.status is not None else task.get("status")
+    next_actual_time = payload.actual_time if payload.actual_time is not None else task.get("actual_time")
+    if str(next_status or "").strip().lower() in ["done", "completed"] and next_actual_time is None:
+        raise HTTPException(status_code=400, detail="Actual time is required when task is completed")
     
-    if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Task not found")
+    if not update_data:
+        raise HTTPException(status_code=400, detail="No update fields provided")
+
+    update_data["updated_at"] = datetime.utcnow()
+    update_data["updated_by"] = str(user.get("email") or "").strip().lower()
+    
+    await reports.update_one({"_id": ObjectId(task_id)}, {"$set": update_data})
+
+    await _log_task_activity(
+        task.get("project_id"),
+        "task_updated",
+        f"Task '{task.get('title', task_id)}' updated",
+        user,
+        {"task_id": task_id, "fields": list(update_data.keys())},
+    )
+    await append_audit_log(
+        "task_updated",
+        user,
+        "task",
+        task_id,
+        {"fields": list(update_data.keys())},
+    )
     
     return {"id": task_id, "status": "Task updated"}
 
 
 @router.post("/task/{task_id}/chat")
 async def add_chat_to_task(task_id: str, payload: ChatRequest, user=Depends(get_current_user)):
+    task = await reports.find_one({"_id": ObjectId(task_id), "type": "TASK"})
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    await require_task_view_access(task, user)
+
     chat_message = {
         "user_email": user["email"],
         "message": payload.message,
@@ -140,10 +403,12 @@ async def add_chat_to_task(task_id: str, payload: ChatRequest, user=Depends(get_
 
 @router.get("/task/{task_id}")
 async def get_task_detail(task_id: str, user=Depends(get_current_user)):
-    task = await reports.find_one({"_id": ObjectId(task_id)})
+    task = await reports.find_one({"_id": ObjectId(task_id), "type": "TASK"})
     
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
+
+    await require_task_view_access(task, user)
     
     return {
         "id": str(task["_id"]),
@@ -152,8 +417,17 @@ async def get_task_detail(task_id: str, user=Depends(get_current_user)):
         "description": task.get("description"),
         "status": task.get("status"),
         "priority": task.get("priority"),
+        "stage": task.get("stage"),
         "task_date": task.get("task_date"),
+        "due_date": task.get("due_date") or task.get("task_date"),
+        "scheduled_start_time": task.get("scheduled_start_time"),
+        "scheduled_end_time": task.get("scheduled_end_time"),
         "estimated_time": task.get("estimated_time"),
+        "actual_time": task.get("actual_time"),
+        "is_break": bool(task.get("is_break", False)),
+        "blockers": task.get("blockers", ""),
+        "support_required": task.get("support_required", ""),
+        "dependencies_note": task.get("dependencies_note", ""),
         "dependencies": task.get("dependencies", []),
         "resolved_dependencies": task.get("resolved_dependencies", []),
         "assigned_to": task.get("assigned_to", []),
@@ -167,9 +441,15 @@ async def get_task_detail(task_id: str, user=Depends(get_current_user)):
 @router.get("/tasks/{project_id}/by-date")
 async def get_tasks_by_date(project_id: str, date: str, user=Depends(get_current_user)):
     """Get all tasks for a project on a specific date, grouped by team member"""
-    tasks = await reports.find(
-        {"project_id": project_id, "type": "TASK", "task_date": date}
-    ).to_list(None)
+    project = await _get_project_or_404(project_id)
+    if not can_access_project(project, user):
+        raise HTTPException(status_code=403, detail="You do not have access to this project")
+
+    query = await build_task_query_for_user(
+        user,
+        {"project_id": project_id, "type": "TASK", "task_date": date},
+    )
+    tasks = await reports.find(query).to_list(None)
     
     # Group tasks by user
     grouped_tasks = {}
@@ -184,11 +464,13 @@ async def get_tasks_by_date(project_id: str, date: str, user=Depends(get_current
             "description": task.get("description"),
             "status": task.get("status"),
             "priority": task.get("priority"),
+            "stage": task.get("stage"),
             "estimated_time": task.get("estimated_time"),
             "dependencies": task.get("dependencies", []),
             "assigned_to": task.get("assigned_to", []),
             "created_by": task.get("created_by"),
             "task_date": task.get("task_date"),
+            "due_date": task.get("due_date") or task.get("task_date"),
             "created_at": task.get("created_at")
         })
     
@@ -197,9 +479,12 @@ async def get_tasks_by_date(project_id: str, date: str, user=Depends(get_current
 
 @router.get("/tasks/{project_id}")
 async def get_project_tasks(project_id: str, user=Depends(get_current_user)):
-    tasks = await reports.find(
-        {"project_id": project_id, "type": "TASK"}
-    ).to_list(None)
+    project = await _get_project_or_404(project_id)
+    if not can_access_project(project, user):
+        raise HTTPException(status_code=403, detail="You do not have access to this project")
+
+    query = await build_task_query_for_user(user, {"project_id": project_id, "type": "TASK"})
+    tasks = await reports.find(query).to_list(None)
     
     # Group tasks by user
     grouped_tasks = {}
@@ -214,11 +499,13 @@ async def get_project_tasks(project_id: str, user=Depends(get_current_user)):
             "description": task.get("description"),
             "status": task.get("status"),
             "priority": task.get("priority"),
+            "stage": task.get("stage"),
             "estimated_time": task.get("estimated_time"),
             "dependencies": task.get("dependencies", []),
             "assigned_to": task.get("assigned_to", []),
             "created_by": task.get("created_by"),
             "task_date": task.get("task_date"),
+            "due_date": task.get("due_date") or task.get("task_date"),
             "created_at": task.get("created_at")
         })
     
@@ -227,6 +514,10 @@ async def get_project_tasks(project_id: str, user=Depends(get_current_user)):
 
 @router.get("/moms/{project_id}")
 async def get_project_moms(project_id: str, user=Depends(get_current_user)):
+    project = await _get_project_or_404(project_id)
+    if not can_access_project(project, user):
+        raise HTTPException(status_code=403, detail="You do not have access to this project")
+
     moms = await reports.find(
         {"project_id": project_id, "type": "MOM"}
     ).to_list(None)
@@ -243,7 +534,7 @@ async def get_project_moms(project_id: str, user=Depends(get_current_user)):
 @router.get("/user-tasks")
 async def get_user_tasks(user=Depends(get_current_user)):
     tasks = await reports.find(
-        {"user_id": user["id"], "type": "TASK"}
+        await build_task_query_for_user(user, {"type": "TASK"})
     ).sort("task_date", -1).to_list(None)
     
     return [{
@@ -253,7 +544,9 @@ async def get_user_tasks(user=Depends(get_current_user)):
         "description": task.get("description"),
         "status": task.get("status"),
         "priority": task.get("priority"),
+        "stage": task.get("stage"),
         "task_date": task.get("task_date"),
+        "due_date": task.get("due_date") or task.get("task_date"),
         "estimated_time": task.get("estimated_time"),
         "dependencies": task.get("dependencies", []),
         "resolved_dependencies": task.get("resolved_dependencies", []),
@@ -267,7 +560,7 @@ async def get_user_tasks(user=Depends(get_current_user)):
 async def get_all_tasks(user=Depends(get_current_user)):
     """Get all tasks in the system (for viewing tasks where user is tagged as dependency)"""
     tasks = await reports.find(
-        {"type": "TASK"}
+        await build_task_query_for_user(user, {"type": "TASK"})
     ).sort("task_date", -1).to_list(None)
     
     return [{
@@ -277,7 +570,9 @@ async def get_all_tasks(user=Depends(get_current_user)):
         "description": task.get("description"),
         "status": task.get("status"),
         "priority": task.get("priority"),
+        "stage": task.get("stage"),
         "task_date": task.get("task_date"),
+        "due_date": task.get("due_date") or task.get("task_date"),
         "estimated_time": task.get("estimated_time"),
         "dependencies": task.get("dependencies", []),
         "resolved_dependencies": task.get("resolved_dependencies", []),
@@ -290,8 +585,12 @@ async def get_all_tasks(user=Depends(get_current_user)):
 @router.get("/team-members/{project_id}")
 async def get_team_members(project_id: str, user=Depends(get_current_user)):
     """Get all team members who have submitted tasks for a project"""
+    project = await _get_project_or_404(project_id)
+    if not can_access_project(project, user):
+        raise HTTPException(status_code=403, detail="You do not have access to this project")
+
     tasks = await reports.find(
-        {"project_id": project_id, "type": "TASK"}
+        await build_task_query_for_user(user, {"project_id": project_id, "type": "TASK"})
     ).to_list(None)
     
     # Get unique team members
@@ -312,8 +611,11 @@ async def get_team_members(project_id: str, user=Depends(get_current_user)):
 @router.get("/tasks/{project_id}/by-member/{member_email}")
 async def get_member_tasks_by_date(project_id: str, member_email: str, user=Depends(get_current_user)):
     """Get all tasks for a specific team member in a project, grouped by date"""
+    if not is_privileged_role(user.get("role")):
+        raise HTTPException(status_code=403, detail="Admin access required")
+
     tasks = await reports.find(
-        {"project_id": project_id, "type": "TASK", "user_email": member_email}
+        {"project_id": project_id, "type": "TASK", "assigned_to": str(member_email).strip().lower()}
     ).sort("task_date", -1).to_list(None)
     
     # Group tasks by date
@@ -329,11 +631,13 @@ async def get_member_tasks_by_date(project_id: str, member_email: str, user=Depe
             "description": task.get("description"),
             "status": task.get("status"),
             "priority": task.get("priority"),
+            "stage": task.get("stage"),
             "estimated_time": task.get("estimated_time"),
             "dependencies": task.get("dependencies", []),
             "assigned_to": task.get("assigned_to", []),
             "created_by": task.get("created_by"),
             "task_date": task.get("task_date"),
+            "due_date": task.get("due_date") or task.get("task_date"),
             "created_at": task.get("created_at")
         })
     
@@ -343,8 +647,11 @@ async def get_member_tasks_by_date(project_id: str, member_email: str, user=Depe
 @router.get("/tasks/by-member/{member_email}")
 async def get_member_tasks_all_projects(member_email: str, user=Depends(get_current_user)):
     """Get all tasks for a specific team member across all projects, grouped by date"""
+    if not is_privileged_role(user.get("role")):
+        raise HTTPException(status_code=403, detail="Admin access required")
+
     tasks = await reports.find(
-        {"type": "TASK", "user_email": member_email}
+        {"type": "TASK", "assigned_to": str(member_email).strip().lower()}
     ).sort("task_date", -1).to_list(None)
 
     grouped_tasks = {}
@@ -359,11 +666,13 @@ async def get_member_tasks_all_projects(member_email: str, user=Depends(get_curr
             "description": task.get("description"),
             "status": task.get("status"),
             "priority": task.get("priority"),
+            "stage": task.get("stage"),
             "estimated_time": task.get("estimated_time"),
             "dependencies": task.get("dependencies", []),
             "assigned_to": task.get("assigned_to", []),
             "created_by": task.get("created_by"),
             "task_date": task.get("task_date"),
+            "due_date": task.get("due_date") or task.get("task_date"),
             "project_id": task.get("project_id"),
             "created_at": task.get("created_at")
         })
@@ -374,6 +683,9 @@ async def get_member_tasks_all_projects(member_email: str, user=Depends(get_curr
 @router.get("/tasks/today/breakdown")
 async def get_today_tasks_breakdown(user=Depends(get_current_user)):
     """Get all tasks for today grouped by team member with status breakdown"""
+    if not is_privileged_role(user.get("role")):
+        raise HTTPException(status_code=403, detail="Admin access required")
+
     from datetime import datetime
     today = datetime.utcnow().date().isoformat()
     
@@ -406,6 +718,7 @@ async def get_today_tasks_breakdown(user=Depends(get_current_user)):
             "title": task.get("title"),
             "status": status,
             "priority": priority,
+            "stage": task.get("stage"),
             "project_id": task.get("project_id")
         })
     
@@ -502,13 +815,27 @@ async def get_hourly_breakdown(
 @router.put("/task/{task_id}/complete")
 async def mark_task_complete(task_id: str, user=Depends(get_current_user)):
     """Mark task as completed"""
+    task = await reports.find_one({"_id": ObjectId(task_id), "type": "TASK"})
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    await require_task_view_access(task, user)
+    if not _can_manage_task(task, user):
+        raise HTTPException(status_code=403, detail="You do not have permission to update this task")
+
     result = await reports.update_one(
         {"_id": ObjectId(task_id)},
         {"$set": {"status": "Done", "updated_at": datetime.utcnow()}}
     )
-    
-    if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Task not found")
+
+    if result.modified_count > 0:
+        await _log_task_activity(
+            task.get("project_id"),
+            "task_status_changed",
+            f"Task '{task.get('title', task_id)}' marked as Done",
+            user,
+            {"task_id": task_id, "new_status": "Done"},
+        )
     
     return {"id": task_id, "status": "Task marked as completed"}
 
@@ -516,10 +843,12 @@ async def mark_task_complete(task_id: str, user=Depends(get_current_user)):
 @router.put("/task/{task_id}/resolve-dependency")
 async def resolve_dependency(task_id: str, user=Depends(get_current_user)):
     """Mark dependency as resolved by the tagged user"""
-    task = await reports.find_one({"_id": ObjectId(task_id)})
+    task = await reports.find_one({"_id": ObjectId(task_id), "type": "TASK"})
     
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
+
+    await require_task_view_access(task, user)
     
     # Check if user is in the dependencies list
     dependencies = task.get("dependencies", [])
@@ -539,6 +868,14 @@ async def resolve_dependency(task_id: str, user=Depends(get_current_user)):
         
         if result.matched_count == 0:
             raise HTTPException(status_code=404, detail="Task not found")
+
+        await _log_task_activity(
+            task.get("project_id"),
+            "task_dependency_resolved",
+            f"Dependency resolved by {user['email']} for task '{task.get('title', task_id)}'",
+            user,
+            {"task_id": task_id},
+        )
     
     return {
         "id": task_id,
@@ -560,7 +897,7 @@ async def move_incomplete_tasks(date: str, user=Depends(get_current_user)):
     incomplete_tasks = await reports.find(
         {
             "type": "TASK",
-            "user_id": user["id"],
+            "assigned_to": str(user.get("email") or "").strip().lower(),
             "task_date": date,
             "status": {"$in": ["To Do", "In Progress"]}
         }

@@ -5,6 +5,7 @@ from bson import ObjectId
 from app.db import account_requests, users
 from app.auth import hash_password
 from app.deps import get_current_user
+from app.rbac import is_privileged_role
 
 router = APIRouter(prefix="/reports", tags=["requests"])
 
@@ -13,7 +14,7 @@ router = APIRouter(prefix="/reports", tags=["requests"])
 async def get_account_requests(current_user: dict = Depends(get_current_user)):
     """Get all account creation requests (for project managers)"""
     # Only project managers can view requests
-    if current_user.get("role") != "project_manager":
+    if not is_privileged_role(current_user.get("role")):
         raise HTTPException(status_code=403, detail="Only project managers can view requests")
     
     try:
@@ -37,7 +38,7 @@ async def approve_request(
     current_user: dict = Depends(get_current_user)
 ):
     """Approve an account creation request and create the user"""
-    if current_user.get("role") != "project_manager":
+    if not is_privileged_role(current_user.get("role")):
         raise HTTPException(status_code=403, detail="Only project managers can approve requests")
     
     try:
@@ -85,7 +86,7 @@ async def reject_request(
     current_user: dict = Depends(get_current_user)
 ):
     """Reject an account creation request"""
-    if current_user.get("role") != "project_manager":
+    if not is_privileged_role(current_user.get("role")):
         raise HTTPException(status_code=403, detail="Only project managers can reject requests")
     
     try:

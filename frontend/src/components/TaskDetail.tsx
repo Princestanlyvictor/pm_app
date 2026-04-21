@@ -137,7 +137,7 @@ export default function TaskDetail({
               fontSize: 18
             }}
           >
-            ✕
+            X
           </button>
         </div>
 
@@ -154,7 +154,7 @@ export default function TaskDetail({
               <p><strong>Estimated Time:</strong> {task.estimated_time ? `${task.estimated_time} hours` : "Not set"}</p>
               <p><strong>Created by:</strong> {task.created_by}</p>
               {task.dependencies?.length > 0 && (
-                <p><strong>🏷️ Tagged Team Members:</strong> {task.dependencies.join(", ")}</p>
+                <p><strong>Tagged Team Members:</strong> {task.dependencies.join(", ")}</p>
               )}
             </div>
 
@@ -236,7 +236,7 @@ export default function TaskDetail({
             </div>
 
             <div style={{ marginBottom: 15 }}>
-              <label style={{ display: "block", marginBottom: 5, fontWeight: "bold" }}>🏷️ Tag Team Members (Dependencies):</label>
+              <label style={{ display: "block", marginBottom: 5, fontWeight: "bold" }}>Tag Team Members (Dependencies):</label>
               <div style={{ backgroundColor: "#f9f9f9", padding: 10, borderRadius: 4 }}>
                 {projectTeamMembers.length === 0 ? (
                   <p style={{ margin: 0, color: "#666" }}>No team members available to tag</p>
