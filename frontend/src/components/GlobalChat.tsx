@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import api from "../services/api";
 
 interface GlobalChatProps {
@@ -22,9 +22,6 @@ interface ChatUser {
 
 export default function GlobalChat({ token, currentEmail }: GlobalChatProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [users, setUsers] = useState<ChatUser[]>([]);
-  const [search, setSearch] = useState("");
-  const [showMembers, setShowMembers] = useState(true);
   const [newMessage, setNewMessage] = useState("");
   const [isTyping, setIsTyping] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -110,23 +107,11 @@ export default function GlobalChat({ token, currentEmail }: GlobalChatProps) {
     }
   }, [token, atBottom, scrollToLatest]);
 
-  const fetchUsers = useCallback(async () => {
-    try {
-      const res = await api.get("/chat/users", {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      setUsers((res.data || []) as ChatUser[]);
-    } catch (err) {
-      console.error("Failed to fetch users", err);
-    }
-  }, [token]);
-
   useEffect(() => {
     fetchMessages();
-    fetchUsers();
     const interval = setInterval(fetchMessages, 4000);
     return () => clearInterval(interval);
-  }, [fetchMessages, fetchUsers]);
+  }, [fetchMessages]);
 
   useEffect(() => {
     const container = messageListRef.current;
@@ -184,24 +169,6 @@ export default function GlobalChat({ token, currentEmail }: GlobalChatProps) {
     }
   };
 
-  const onlineUsers = useMemo(() => {
-    const now = Date.now();
-    const set = new Set<string>();
-    messages.forEach((item) => {
-      const createdAt = new Date(item.created_at).getTime();
-      if (now - createdAt <= 10 * 60 * 1000) {
-        set.add(item.user_email);
-      }
-    });
-    return set;
-  }, [messages]);
-
-  const filteredUsers = useMemo(() => {
-    const query = search.toLowerCase().trim();
-    if (!query) return users;
-    return users.filter((user) => user.email.toLowerCase().includes(query));
-  }, [search, users]);
-
   let lastLabel = "";
   const chatRows = messages.map((message) => {
     const groupLabel = getDateLabel(message.created_at);
@@ -214,59 +181,12 @@ export default function GlobalChat({ token, currentEmail }: GlobalChatProps) {
 
   return (
     <div className="chat-layout">
-      <aside className={`chat-people-panel ${showMembers ? "open" : ""}`}>
-        <div className="chat-panel-header">
-          <h4>Team Members</h4>
-          <span>{users.length}</span>
-        </div>
-
-        <div className="chat-user-search-wrap">
-          <input
-            type="text"
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            className="chat-user-search"
-            placeholder="Search teammates"
-            aria-label="Search teammates"
-          />
-        </div>
-
-        <div className="chat-user-list">
-          {filteredUsers.map((user) => {
-            const isCurrent = user.email === currentEmail;
-            return (
-              <div key={user.id} className={`chat-user-item ${isCurrent ? "is-current" : ""}`}>
-                <div className="chat-user-avatar" aria-hidden="true">{avatarText(user.email)}</div>
-                <div className="chat-user-meta">
-                  <div className="chat-user-top-row">
-                    <span className="chat-user-email">{user.email}</span>
-                    <span className={`chat-role-pill ${badgeColorClass(user.role)}`}>{roleLabel(user.role)}</span>
-                  </div>
-                  <div className="chat-user-status-row">
-                    <span className={`status-dot ${onlineUsers.has(user.email) ? "online" : "offline"}`} />
-                    <span>{onlineUsers.has(user.email) ? "Online" : "Offline"}</span>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-          {filteredUsers.length === 0 && <p className="chat-empty-note">No users match your search.</p>}
-        </div>
-      </aside>
-
       <section className="chat-conversation-card">
         <div className="chat-conversation-header">
           <div>
             <h3>Global Team Chat</h3>
             <p>Everyone in your workspace can see these messages.</p>
           </div>
-          <button
-            type="button"
-            className="chat-mobile-members-toggle"
-            onClick={() => setShowMembers((open) => !open)}
-          >
-            {showMembers ? "Hide members" : "Show members"}
-          </button>
         </div>
 
         <div className="chat-message-stream" ref={messageListRef}>
