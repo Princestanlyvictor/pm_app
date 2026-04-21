@@ -65,7 +65,7 @@
   margin: 0 0 10px;
 }
 
-.auth-role-tags span {
+.auth-role-tags .role-tag {
   font-size: 12px;
   font-weight: 600;
   color: var(--saas-primary);
@@ -73,6 +73,20 @@
   border: 1px solid #e0e5ff;
   border-radius: 999px;
   padding: 5px 10px;
+  cursor: pointer;
+  transition: all 160ms ease;
+}
+
+.auth-role-tags .role-tag:hover {
+  background: #e0e5ff;
+  border-color: var(--saas-primary);
+}
+
+.auth-role-tags .role-tag.active {
+  background: var(--saas-primary);
+  color: #ffffff;
+  border-color: var(--saas-primary);
+  box-shadow: 0 4px 12px rgba(14, 10, 60, 0.2);
 }
 
 .field-label {
@@ -98,6 +112,43 @@
   outline: none;
   border-color: var(--saas-primary);
   box-shadow: 0 0 0 3px rgba(14, 10, 60, 0.1);
+}
+
+.password-field-wrapper {
+  position: relative;
+  width: 100%;
+}
+
+.password-field-wrapper .text-input {
+  padding-right: 46px;
+}
+
+.eye-toggle-btn {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 160ms ease;
+  z-index: 10;
+}
+
+.eye-toggle-btn:hover {
+  background: #f1f5f9;
+  color: var(--saas-primary);
+}
+
+.eye-toggle-btn svg {
+  width: 18px;
+  height: 18px;
 }
 
 .primary-btn {
@@ -156,6 +207,24 @@
   padding: 10px;
   font-weight: 600;
   font-size: 13px;
+}
+
+.error-banner.pending-approval {
+  background: #fffbf0;
+  color: #d97706;
+  border: 1px solid #fed7aa;
+}
+
+.error-banner.invalid-credentials {
+  background: #fff1f3;
+  color: #dc2626;
+  border: 1px solid #ffc9d2;
+}
+
+.error-banner.rejected-account {
+  background: #fef2f2;
+  color: #991b1b;
+  border: 1px solid #fee2e2;
 }
 
 .auth-grid-two {
