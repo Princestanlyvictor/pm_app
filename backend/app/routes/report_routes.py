@@ -57,6 +57,70 @@ def _can_manage_task(task: dict, user: dict) -> bool:
     return user_email in normalized_assignees
 
 
+def _to_minutes(value: str) -> int:
+    parts = str(value or "").split(":")
+    if len(parts) != 2:
+        raise ValueError("Time must be in HH:MM format")
+    hours = int(parts[0])
+    minutes = int(parts[1])
+    if hours < 0 or hours > 23 or minutes < 0 or minutes > 59:
+        raise ValueError("Invalid time value")
+    return (hours * 60) + minutes
+
+
+def _has_overlap(start_a: int, end_a: int, start_b: int, end_b: int) -> bool:
+    return max(start_a, start_b) < min(end_a, end_b)
+
+
+async def _validate_task_schedule(
+    *,
+    project_id: str,
+    assignees: List[str],
+    task_date: str,
+    start_time: Optional[str],
+    end_time: Optional[str],
+    exclude_task_id: Optional[str] = None,
+):
+    if not start_time and not end_time:
+        return
+
+    if not start_time or not end_time:
+        raise HTTPException(status_code=400, detail="Both start time and end time are required")
+
+    try:
+        start_minutes = _to_minutes(start_time)
+        end_minutes = _to_minutes(end_time)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if end_minutes <= start_minutes:
+        raise HTTPException(status_code=400, detail="End time must be greater than start time")
+
+    query = {
+        "type": "TASK",
+        "project_id": project_id,
+        "task_date": task_date,
+        "assigned_to": {"$in": assignees},
+        "scheduled_start_time": {"$exists": True, "$ne": None},
+        "scheduled_end_time": {"$exists": True, "$ne": None},
+    }
+    if exclude_task_id:
+        query["_id"] = {"$ne": ObjectId(exclude_task_id)}
+
+    existing_tasks = await reports.find(query).to_list(None)
+    for existing in existing_tasks:
+        try:
+            existing_start = _to_minutes(existing.get("scheduled_start_time"))
+            existing_end = _to_minutes(existing.get("scheduled_end_time"))
+        except Exception:
+            continue
+        if _has_overlap(start_minutes, end_minutes, existing_start, existing_end):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Time overlap with existing task '{existing.get('title', 'Untitled')}'",
+            )
+
+
 class MOMRequest(BaseModel):
     project_id: str
     date: str
@@ -74,7 +138,12 @@ class TaskRequest(BaseModel):
     due_date: Optional[str] = None
     scheduled_start_time: Optional[str] = None  # Start time HH:MM format (00:00 - 23:59)
     scheduled_end_time: Optional[str] = None  # End time HH:MM format (00:00 - 23:59)
-    estimated_time: Optional[int] = None  # in hours
+    estimated_time: Optional[float] = None  # in hours
+    actual_time: Optional[float] = None  # in hours
+    is_break: Optional[bool] = False
+    blockers: Optional[str] = None
+    support_required: Optional[str] = None
+    dependencies_note: Optional[str] = None
     dependencies: Optional[List[str]] = None  # list of tagged user emails
     assigned_to: Optional[List[str]] = None  # list of user emails
 
@@ -85,8 +154,16 @@ class TaskUpdateRequest(BaseModel):
     status: Optional[str] = None
     priority: Optional[str] = None
     stage: Optional[str] = None
+    task_date: Optional[str] = None
     due_date: Optional[str] = None
-    estimated_time: Optional[int] = None
+    scheduled_start_time: Optional[str] = None
+    scheduled_end_time: Optional[str] = None
+    estimated_time: Optional[float] = None
+    actual_time: Optional[float] = None
+    is_break: Optional[bool] = None
+    blockers: Optional[str] = None
+    support_required: Optional[str] = None
+    dependencies_note: Optional[str] = None
     dependencies: Optional[List[str]] = None
     assigned_to: Optional[List[str]] = None
 
@@ -124,6 +201,23 @@ async def create_task(payload: TaskRequest, user=Depends(get_current_user)):
     requested_assignees = payload.assigned_to or [str(user.get("email") or "").strip().lower()]
     assigned_to = await validate_task_assignment(project, requested_assignees)
 
+    await _validate_task_schedule(
+        project_id=payload.project_id,
+        assignees=assigned_to,
+        task_date=payload.task_date,
+        start_time=payload.scheduled_start_time,
+        end_time=payload.scheduled_end_time,
+    )
+
+    derived_estimated_time = payload.estimated_time
+    if payload.scheduled_start_time and payload.scheduled_end_time:
+        start_minutes = _to_minutes(payload.scheduled_start_time)
+        end_minutes = _to_minutes(payload.scheduled_end_time)
+        derived_estimated_time = round((end_minutes - start_minutes) / 60, 2)
+
+    if str(payload.status or "").strip().lower() in ["done", "completed"] and payload.actual_time is None:
+        raise HTTPException(status_code=400, detail="Actual time is required when task is completed")
+
     stage_value = payload.stage
     if not stage_value:
         default_stages = (project.get("roadmap") or {}).get("stages", [])
@@ -142,7 +236,12 @@ async def create_task(payload: TaskRequest, user=Depends(get_current_user)):
         "due_date": payload.due_date or payload.task_date,
         "scheduled_start_time": payload.scheduled_start_time,  # Store start time HH:MM
         "scheduled_end_time": payload.scheduled_end_time,      # Store end time HH:MM
-        "estimated_time": payload.estimated_time,
+        "estimated_time": derived_estimated_time,
+        "actual_time": payload.actual_time,
+        "is_break": bool(payload.is_break),
+        "blockers": payload.blockers or "",
+        "support_required": payload.support_required or "",
+        "dependencies_note": payload.dependencies_note or "",
         "dependencies": payload.dependencies or [],
         "resolved_dependencies": [],  # Track which dependencies have been resolved
         "assigned_to": assigned_to,
@@ -192,6 +291,10 @@ async def update_task(task_id: str, payload: TaskUpdateRequest, user=Depends(get
     project = await _get_project_or_404(str(task.get("project_id")))
 
     update_data = {}
+    next_task_date = payload.task_date if payload.task_date is not None else task.get("task_date")
+    next_start_time = payload.scheduled_start_time if payload.scheduled_start_time is not None else task.get("scheduled_start_time")
+    next_end_time = payload.scheduled_end_time if payload.scheduled_end_time is not None else task.get("scheduled_end_time")
+    next_assignees = payload.assigned_to if payload.assigned_to is not None else (task.get("assigned_to") or [])
     
     if payload.title is not None:
         update_data["title"] = payload.title
@@ -203,14 +306,50 @@ async def update_task(task_id: str, payload: TaskUpdateRequest, user=Depends(get
         update_data["priority"] = payload.priority
     if payload.stage is not None:
         update_data["stage"] = payload.stage
+    if payload.task_date is not None:
+        update_data["task_date"] = payload.task_date
     if payload.due_date is not None:
         update_data["due_date"] = payload.due_date
+    if payload.scheduled_start_time is not None:
+        update_data["scheduled_start_time"] = payload.scheduled_start_time
+    if payload.scheduled_end_time is not None:
+        update_data["scheduled_end_time"] = payload.scheduled_end_time
     if payload.estimated_time is not None:
         update_data["estimated_time"] = payload.estimated_time
+    if payload.actual_time is not None:
+        update_data["actual_time"] = payload.actual_time
+    if payload.is_break is not None:
+        update_data["is_break"] = bool(payload.is_break)
+    if payload.blockers is not None:
+        update_data["blockers"] = payload.blockers
+    if payload.support_required is not None:
+        update_data["support_required"] = payload.support_required
+    if payload.dependencies_note is not None:
+        update_data["dependencies_note"] = payload.dependencies_note
     if payload.dependencies is not None:
         update_data["dependencies"] = payload.dependencies
     if payload.assigned_to is not None:
         update_data["assigned_to"] = await validate_task_assignment(project, payload.assigned_to)
+        next_assignees = update_data["assigned_to"]
+
+    await _validate_task_schedule(
+        project_id=str(task.get("project_id")),
+        assignees=next_assignees,
+        task_date=next_task_date,
+        start_time=next_start_time,
+        end_time=next_end_time,
+        exclude_task_id=task_id,
+    )
+
+    if next_start_time and next_end_time:
+        start_minutes = _to_minutes(next_start_time)
+        end_minutes = _to_minutes(next_end_time)
+        update_data["estimated_time"] = round((end_minutes - start_minutes) / 60, 2)
+
+    next_status = payload.status if payload.status is not None else task.get("status")
+    next_actual_time = payload.actual_time if payload.actual_time is not None else task.get("actual_time")
+    if str(next_status or "").strip().lower() in ["done", "completed"] and next_actual_time is None:
+        raise HTTPException(status_code=400, detail="Actual time is required when task is completed")
     
     if not update_data:
         raise HTTPException(status_code=400, detail="No update fields provided")
@@ -281,7 +420,14 @@ async def get_task_detail(task_id: str, user=Depends(get_current_user)):
         "stage": task.get("stage"),
         "task_date": task.get("task_date"),
         "due_date": task.get("due_date") or task.get("task_date"),
+        "scheduled_start_time": task.get("scheduled_start_time"),
+        "scheduled_end_time": task.get("scheduled_end_time"),
         "estimated_time": task.get("estimated_time"),
+        "actual_time": task.get("actual_time"),
+        "is_break": bool(task.get("is_break", False)),
+        "blockers": task.get("blockers", ""),
+        "support_required": task.get("support_required", ""),
+        "dependencies_note": task.get("dependencies_note", ""),
         "dependencies": task.get("dependencies", []),
         "resolved_dependencies": task.get("resolved_dependencies", []),
         "assigned_to": task.get("assigned_to", []),

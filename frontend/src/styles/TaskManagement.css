@@ -198,6 +198,30 @@
 .tm-filters {
   display: flex;
   gap: 10px;
+  flex-wrap: wrap;
+}
+
+.planning-indicator {
+  margin-bottom: 16px;
+  padding: 10px 12px;
+  border: 1px solid #dbe4f3;
+  border-radius: 8px;
+  background: #f8fbff;
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  font-size: 13px;
+  color: #334155;
+}
+
+.planning-warning.warn {
+  color: #b54708;
+  font-weight: 600;
+}
+
+.planning-warning.valid {
+  color: #027a48;
+  font-weight: 600;
 }
 
 .tm-select {
@@ -240,7 +264,7 @@
 
 .form-grid {
   display: grid;
-  grid-template-columns: repeat(5, minmax(150px, 1fr)) auto;
+  grid-template-columns: repeat(4, minmax(170px, 1fr));
   gap: 10px;
 }
 
@@ -251,6 +275,11 @@
   font-size: 14px;
   font-family: inherit;
   transition: all 0.2s ease;
+}
+
+textarea.form-input {
+  min-height: 42px;
+  resize: vertical;
 }
 
 .form-input:focus {
@@ -325,7 +354,7 @@
   border-radius: 8px;
   overflow: hidden;
   margin-top: 24px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
 }
 
 .tm-task-table {
@@ -334,22 +363,35 @@
   font-size: 14px;
 }
 
+.tm-task-table td,
+.tm-task-table th {
+  white-space: nowrap;
+}
+
+.tm-truncate-cell {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* Table Header */
 .tm-table-header {
-  background: #f9fafb;
-  border-bottom: 2px solid #e5e7eb;
+  background: #fbfcfe;
+  border-bottom: 1px solid #e5e7eb;
   font-weight: 600;
   color: #374151;
 }
 
 .tm-table-header th {
-  padding: 16px 12px;
+  padding: 12px 14px;
   text-align: left;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
   color: #6b7280;
-  background: #f9fafb;
-  border-bottom: 2px solid #e5e7eb;
+  background: #fbfcfe;
+  border-bottom: 1px solid #e5e7eb;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
 }
 
 /* Task Rows */
@@ -368,28 +410,23 @@
 }
 
 .tm-task-row td {
-  padding: 14px 12px;
+  padding: 10px 14px;
   vertical-align: middle;
 }
 
 /* Column Styling */
-.expand-col {
-  width: 40px;
-  text-align: center;
-}
-
 .expand-btn {
-  background: transparent;
-  border: none;
+  background: #f3f4f6;
+  border: 1px solid #e5e7eb;
   cursor: pointer;
-  font-size: 13px;
-  padding: 4px;
+  font-size: 11px;
+  padding: 0;
   color: #374151;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 20px;
+  height: 20px;
   border-radius: 4px;
   transition: background-color 0.2s ease;
 }
@@ -398,8 +435,10 @@
   background-color: #e5e7eb;
 }
 
-.status-col {
-  width: 120px;
+.expand-placeholder {
+  width: 20px;
+  height: 20px;
+  display: inline-block;
 }
 
 .status-select {
@@ -422,14 +461,29 @@
   box-shadow: 0 0 0 2px rgba(47, 111, 237, 0.1);
 }
 
+.status-select.inline {
+  width: auto;
+  min-width: 118px;
+  max-width: 130px;
+  font-size: 12px;
+  padding: 4px 8px;
+  background: #f8fafc;
+}
+
 .name-col {
-  width: 32%;
+  width: 46%;
 }
 
 .name-cell {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
+}
+
+.task-title-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .task-title-text {
@@ -437,8 +491,14 @@
   color: #0f172a;
 }
 
+.task-meta-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .task-description-text {
-  font-size: 13px;
+  font-size: 12px;
   color: #6b7280;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -447,12 +507,12 @@
 
 .subtask-indicator {
   font-size: 12px;
-  color: #2f6fed;
+  color: #667085;
   font-weight: 500;
 }
 
 .assignee-col {
-  width: 180px;
+  width: 22%;
 }
 
 .assignee-badge {
@@ -484,7 +544,7 @@
 }
 
 .due-date-col {
-  width: 150px;
+  width: 14%;
 }
 
 .due-date-text {
@@ -493,7 +553,7 @@
 }
 
 .priority-col {
-  width: 100px;
+  width: 11%;
 }
 
 .priority-badge {
@@ -507,18 +567,8 @@
   min-width: 60px;
 }
 
-.eta-col {
-  width: 80px;
-  text-align: center;
-}
-
-.eta-text {
-  font-weight: 500;
-  color: #374151;
-}
-
-.actions-col {
-  width: 60px;
+.add-col {
+  width: 7%;
   text-align: center;
 }
 
@@ -529,13 +579,13 @@
 }
 
 .action-btn {
-  width: 28px;
-  height: 28px;
+  width: 26px;
+  height: 26px;
   border: 1px solid #d1d5db;
-  background: white;
+  background: #ffffff;
   border-radius: 4px;
   cursor: pointer;
-  font-size: 12px;
+  font-size: 14px;
   transition: all 0.2s ease;
   display: flex;
   align-items: center;
@@ -576,29 +626,45 @@
 }
 
 .tm-subtask-row td {
-  padding: 12px 12px;
+  padding: 9px 14px;
 }
 
 .tm-subtask-row .name-col {
-  padding-left: 48px;
+  padding-left: 28px;
 }
 
 .subtask-name {
   font-size: 13px;
   color: #374151;
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .subtask-open-hint {
   margin-top: 2px;
   font-size: 11px;
-  color: #2f6fed;
+  color: #667085;
 }
 
-.subtask-checkbox {
-  width: 18px;
-  height: 18px;
+.subtask-checkbox-indicator {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid #cbd5e1;
+  background: #ffffff;
+  flex-shrink: 0;
   cursor: pointer;
-  accent-color: #2f6fed;
+}
+
+.subtask-checkbox-indicator.completed {
+  border-color: #2f6fed;
+  background: #2f6fed;
+}
+
+.subtask-menu-hint {
+  color: #9ca3af;
+  font-size: 14px;
 }
 
 /* Full Page Subtask Detail Panel */
@@ -834,7 +900,7 @@
   }
 
   .name-col {
-    width: 28%;
+    width: 42%;
   }
 
   .add-subtask-form-inline {
@@ -867,6 +933,11 @@
 
   .tm-task-row td {
     padding: 8px 6px;
+  }
+
+  .status-select.inline {
+    min-width: 100px;
+    max-width: 100px;
   }
 
   .add-subtask-form-inline {

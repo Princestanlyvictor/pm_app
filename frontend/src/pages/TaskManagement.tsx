@@ -9,26 +9,9 @@ interface TaskManagementProps {
   onNavigateToKanban?: () => void;
 }
 
-// ============================================
-// NESTED SUBTASK SYSTEM - Data Structures
-// ============================================
-
-interface Subtask {
-  id: string;
-  title: string;
-  description?: string;
-  status: "todo" | "in_progress" | "completed";
-  priority: "low" | "medium" | "high" | "critical";
-  assignee?: string;
-  due_date?: string;
-  estimated_time?: number;
-}
-
-interface ProjectMember {
-  email: string;
-  role?: string;
-  name?: string;
-}
+type TaskStatus = "todo" | "in_progress" | "completed";
+type TaskPriority = "low" | "medium" | "high" | "critical";
+type ShiftType = "08:00" | "09:00";
 
 interface ProjectOption {
   id: string;
@@ -40,13 +23,23 @@ interface ProjectOption {
 interface ApiTaskItem {
   id: string;
   project_id: string;
+  parent_task_id?: string;
   title: string;
   description?: string;
   status?: string;
   priority?: string;
+  task_date?: string;
   due_date?: string;
+  scheduled_start_time?: string;
+  scheduled_end_time?: string;
   assigned_to?: string[];
   estimated_time?: number;
+  actual_time?: number;
+  is_break?: boolean;
+  blockers?: string;
+  support_required?: string;
+  dependencies_note?: string;
+  dependencies?: string[];
 }
 
 interface TreeTask {
@@ -54,15 +47,20 @@ interface TreeTask {
   project_id: string;
   title: string;
   description?: string;
-  status: "todo" | "in_progress" | "completed";
-  priority: "low" | "medium" | "high" | "critical";
+  status: TaskStatus;
+  priority: TaskPriority;
   assignee?: string;
+  task_date?: string;
   due_date?: string;
   estimated_time?: number;
+  actual_time?: number;
+  is_break?: boolean;
+  scheduled_start_time?: string;
+  scheduled_end_time?: string;
+  dependencies_note?: string;
+  blockers?: string;
+  support_required?: string;
   created_date: string;
-  subtasks: Subtask[];
-  expanded?: boolean;
-  adding_subtask?: boolean;
 }
 
 const TaskManagement: React.FC<TaskManagementProps> = ({
@@ -70,117 +68,76 @@ const TaskManagement: React.FC<TaskManagementProps> = ({
   onNavigateToProjects,
   onNavigateToKanban,
 }) => {
-  const { token } = useContext(AuthContext);
+  const { token, user } = useContext(AuthContext);
   const [errorMessage, setErrorMessage] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [projects, setProjects] = useState<ProjectOption[]>([]);
   const [projectsLoading, setProjectsLoading] = useState(false);
   const [selectedProjectId, setSelectedProjectId] = useState<string>("");
-  const [selectedProjectName, setSelectedProjectName] = useState<string>("");
-  const [projectMembers, setProjectMembers] = useState<ProjectMember[]>([]);
 
-  // ============================================
-  // NESTED SUBTASK SYSTEM - State
-  // ============================================
   const [tasks, setTasks] = useState<TreeTask[]>([]);
   const [tasksLoading, setTasksLoading] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [dateFilter, setDateFilter] = useState<string>(new Date().toISOString().slice(0, 10));
+  const [selectedShift, setSelectedShift] = useState<ShiftType>("09:00");
   
   const [newTaskForm, setNewTaskForm] = useState<{
+    project_id: string;
     title: string;
     description: string;
-    priority: "low" | "medium" | "high" | "critical";
-    assignee: string;
+    date: string;
+    start_time: string;
+    end_time: string;
+    priority: TaskPriority;
+    task_type: "work" | "break";
+    dependencies_note: string;
+    blockers: string;
+    support_required: string;
   }>({
+    project_id: "",
     title: "",
     description: "",
+    date: new Date().toISOString().slice(0, 10),
+    start_time: "09:00",
+    end_time: "10:00",
     priority: "medium",
-    assignee: "",
+    task_type: "work",
+    dependencies_note: "",
+    blockers: "",
+    support_required: "",
   });
   const [showNewTaskForm, setShowNewTaskForm] = useState(false);
-  const [newSubtaskForm, setNewSubtaskForm] = useState<Record<string, {
-    title: string;
-    priority: "low" | "medium" | "high" | "critical";
-    assignee: string;
-    estimated_time: number;
-    description: string;
-    due_date: string;
-  }>>({});
-  const [selectedSubtaskDetail, setSelectedSubtaskDetail] = useState<{
-    parentTaskId: string;
-    parentTaskTitle: string;
-    subtask: Subtask;
-  } | null>(null);
 
   // ============================================
   // HELPER FUNCTIONS
   // ============================================
 
-  const calculateTaskProgress = (task: TreeTask): number => {
-    if (task.subtasks.length === 0) {
-      return task.status === "completed" ? 100 : 0;
-    }
-    const completed = task.subtasks.filter((st) => st.status === "completed").length;
-    return Math.round((completed / task.subtasks.length) * 100);
+  const toMinutes = (time: string) => {
+    const [hours, minutes] = String(time || "").split(":").map(Number);
+    return (hours * 60) + minutes;
   };
 
-  const calculateEstimatedHours = (task: TreeTask): number => {
-    if (task.subtasks.length > 0) {
-      return task.subtasks.reduce((sum, subtask) => sum + (Number(subtask.estimated_time) || 0), 0);
-    }
-    return Number(task.estimated_time) || 0;
+  const getDurationHours = (start: string, end: string) => {
+    if (!start || !end) return 0;
+    const diff = toMinutes(end) - toMinutes(start);
+    if (diff <= 0) return 0;
+    return Number((diff / 60).toFixed(2));
   };
 
-  const getDefaultSubtaskForm = () => ({
-    title: "",
-    priority: "medium" as const,
-    assignee: "",
-    estimated_time: 1,
-    description: "",
-    due_date: "",
-  });
-
-  const getMemberDisplayName = (email: string): string => {
-    const member = projectMembers.find((m) => m.email === email);
-    if (member?.name) return member.name;
-    return email.split("@")[0].replace(/[._-]/g, " ");
-  };
-
-  const extractMemberName = (member: ProjectMember): string => {
-    if (member.name) return member.name;
-    const email = member.email || "";
-    return email.split("@")[0].replace(/[._-]/g, " ");
-  };
-
-  const getPriorityColor = (priority: string) => {
-    switch (priority) {
-      case "critical":
-        return "#ff6b6b";
-      case "high":
-        return "#ff9c3b";
-      case "medium":
-        return "#ffd93b";
-      case "low":
-        return "#6bcf7f";
-      default:
-        return "#667085";
-    }
-  };
-
-  const toUiStatus = (apiStatus?: string): Subtask["status"] => {
+  const toUiStatus = (apiStatus?: string): TaskStatus => {
     const value = String(apiStatus || "").trim().toLowerCase();
     if (value === "done" || value === "completed") return "completed";
     if (value === "in progress" || value === "in_progress") return "in_progress";
     return "todo";
   };
 
-  const toApiStatus = (status: Subtask["status"]): string => {
+  const toApiStatus = (status: TaskStatus): string => {
     if (status === "completed") return "Done";
     if (status === "in_progress") return "In Progress";
     return "To Do";
   };
 
-  const toUiPriority = (apiPriority?: string): Subtask["priority"] => {
+  const toUiPriority = (apiPriority?: string): TaskPriority => {
     const value = String(apiPriority || "").trim().toLowerCase();
     if (value === "critical") return "critical";
     if (value === "high") return "high";
@@ -188,33 +145,14 @@ const TaskManagement: React.FC<TaskManagementProps> = ({
     return "medium";
   };
 
-  const toApiPriority = (priority: Subtask["priority"]): string => {
+  const toApiPriority = (priority: TaskPriority): string => {
     if (priority === "critical") return "Critical";
     if (priority === "high") return "High";
     if (priority === "low") return "Low";
     return "Medium";
   };
 
-  const getToday = () => new Date().toISOString().slice(0, 10);
-
-  const parseParentMarker = (description?: string) => {
-    const source = String(description || "");
-    const markerRegex = /^\s*\[\[SUBTASK_OF:([^\]]+)\]\]\s*/i;
-    const match = source.match(markerRegex);
-    if (!match) {
-      return { parentId: "", cleanedDescription: source };
-    }
-    return {
-      parentId: match[1].trim(),
-      cleanedDescription: source.replace(markerRegex, "").trim(),
-    };
-  };
-
-  const withParentMarker = (description: string, parentTaskId: string) => {
-    const trimmed = description.trim();
-    const marker = `[[SUBTASK_OF:${parentTaskId}]]`;
-    return trimmed ? `${marker} ${trimmed}` : marker;
-  };
+  const shiftEnd = selectedShift === "08:00" ? "18:00" : "19:00";
 
   // ============================================
   // LOAD PROJECTS & MANAGE TASKS
@@ -257,80 +195,36 @@ const TaskManagement: React.FC<TaskManagementProps> = ({
         ? response.data.items
         : [];
 
-      const roots: TreeTask[] = [];
-      const rootById: Record<string, TreeTask> = {};
-      const pendingSubtasks: Array<{ parentId: string; item: ApiTaskItem }> = [];
-
-      rawItems.forEach((item) => {
-        const { parentId, cleanedDescription } = parseParentMarker(item.description);
-        if (parentId) {
-          pendingSubtasks.push({ parentId, item: { ...item, description: cleanedDescription } });
-          return;
-        }
-
-        const rootTask: TreeTask = {
+      const mapped: TreeTask[] = rawItems
+        .filter((item) => !item.parent_task_id)
+        .map((item) => ({
           id: item.id,
           project_id: item.project_id,
           title: item.title,
-          description: cleanedDescription,
+          description: item.description || "",
           status: toUiStatus(item.status),
           priority: toUiPriority(item.priority),
           assignee: item.assigned_to?.[0],
+          task_date: item.task_date || item.due_date,
           due_date: item.due_date,
+          scheduled_start_time: item.scheduled_start_time,
+          scheduled_end_time: item.scheduled_end_time,
           estimated_time: item.estimated_time,
+          actual_time: item.actual_time,
+          is_break: Boolean(item.is_break),
+          dependencies_note: item.dependencies_note || "",
+          blockers: item.blockers || "",
+          support_required: item.support_required || "",
           created_date: "",
-          subtasks: [],
-          expanded: false,
-          adding_subtask: false,
-        };
-        roots.push(rootTask);
-        rootById[item.id] = rootTask;
-      });
+        }));
 
-      pendingSubtasks.forEach(({ parentId, item }) => {
-        const parentTask = rootById[parentId];
-        if (!parentTask) {
-          return;
-        }
-        parentTask.subtasks.push({
-          id: item.id,
-          title: item.title,
-          description: item.description,
-          status: toUiStatus(item.status),
-          priority: toUiPriority(item.priority),
-          assignee: item.assigned_to?.[0],
-          due_date: item.due_date,
-          estimated_time: item.estimated_time,
-        });
-      });
-
-      setTasks(roots);
+      setTasks(mapped);
     } catch (error) {
       console.error("Failed to load tasks", error);
       setErrorMessage("Failed to load tasks for the selected project.");
       setTasks([]);
     } finally {
       setTasksLoading(false);
-    }
-  }, [token]);
-
-  const loadProjectMembers = useCallback(async (projectId: string) => {
-    if (!token || !projectId) return;
-    try {
-      const response = await api.get(`/projects/${projectId}/members`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const members: ProjectMember[] = Array.isArray(response.data)
-        ? response.data.map((member: ProjectMember) => ({
-            email: String(member.email || ""),
-            role: member.role,
-            name: extractMemberName(member),
-          }))
-        : [];
-      setProjectMembers(members.filter((m) => m.email));
-    } catch (error) {
-      console.error("Failed to load project members", error);
-      setProjectMembers([]);
     }
   }, [token]);
 
@@ -341,40 +235,100 @@ const TaskManagement: React.FC<TaskManagementProps> = ({
   }, [token, loadProjects]);
 
   useEffect(() => {
+    if (!selectedProjectId && projects.length > 0) {
+      const firstProject = projects[0];
+      setSelectedProjectId(firstProject.id);
+      setNewTaskForm((prev) => ({ ...prev, project_id: firstProject.id }));
+    }
+  }, [projects, selectedProjectId]);
+
+  useEffect(() => {
     if (selectedProjectId) {
       loadTasks(selectedProjectId);
-      loadProjectMembers(selectedProjectId);
     }
-  }, [selectedProjectId, loadTasks, loadProjectMembers]);
+  }, [selectedProjectId, loadTasks]);
 
   // Filter tasks based on project and status
   const filteredTasks = useMemo(() => {
     return tasks.filter((task) => {
       const statusMatch = statusFilter === "all" || task.status === statusFilter;
-      return statusMatch;
+      const dateMatch = !dateFilter || (task.task_date || task.due_date || "") === dateFilter;
+      return statusMatch && dateMatch;
     });
-  }, [tasks, statusFilter]);
+  }, [tasks, statusFilter, dateFilter]);
 
-  const activeSubtaskParentTask = useMemo(
-    () => tasks.find((task) => task.adding_subtask),
-    [tasks]
+  const plannedHours = useMemo(
+    () => filteredTasks.reduce((sum, task) => sum + (!task.is_break ? (Number(task.estimated_time) || 0) : 0), 0),
+    [filteredTasks]
   );
+
+  const breakHours = useMemo(
+    () => filteredTasks.reduce((sum, task) => sum + (task.is_break ? (Number(task.estimated_time) || 0) : 0), 0),
+    [filteredTasks]
+  );
+
+  const planningWarning = useMemo(() => {
+    if (plannedHours < 8) return "Under-planned";
+    if (plannedHours > 8) return "Over-planned";
+    return "Valid";
+  }, [plannedHours]);
 
   // ============================================
   // CRUD OPERATIONS
   // ============================================
 
   const createTask = async () => {
-    if (!newTaskForm.title.trim()) {
+    const isBreakTask = newTaskForm.task_type === "break";
+    
+    if (!isBreakTask && !newTaskForm.title.trim()) {
       setErrorMessage("Task title is required.");
       return;
     }
-    if (!newTaskForm.assignee.trim()) {
-      setErrorMessage("Task assignee is required.");
+    const currentUserEmail = String(user?.email || "").trim().toLowerCase();
+    if (!currentUserEmail) {
+      setErrorMessage("User session is missing. Please login again.");
       return;
     }
-    if (!selectedProjectId) {
-      setErrorMessage("Select a project first.");
+    if (!newTaskForm.project_id) {
+      setErrorMessage("Select a project while creating task.");
+      return;
+    }
+    if (!newTaskForm.date) {
+      setErrorMessage("Task date is required.");
+      return;
+    }
+    let duration = 0;
+    if (!newTaskForm.start_time || !newTaskForm.end_time) {
+      setErrorMessage("Start time and end time are required.");
+      return;
+    }
+
+    duration = getDurationHours(newTaskForm.start_time, newTaskForm.end_time);
+    if (duration <= 0) {
+      setErrorMessage("End time must be greater than start time.");
+      return;
+    }
+
+    if (isBreakTask) {
+      if (!newTaskForm.start_time || !newTaskForm.end_time) {
+        setErrorMessage("Start time and end time are required for break.");
+        return;
+      }
+    }
+
+    const overlapExists = tasks.some((task) => {
+        const sameDate = (task.task_date || task.due_date || "") === newTaskForm.date;
+        const sameAssignee = String(task.assignee || "").toLowerCase() === currentUserEmail;
+        if (!sameDate || !sameAssignee || !task.scheduled_start_time || !task.scheduled_end_time) return false;
+        const newStart = toMinutes(newTaskForm.start_time);
+        const newEnd = toMinutes(newTaskForm.end_time);
+        const existingStart = toMinutes(task.scheduled_start_time);
+        const existingEnd = toMinutes(task.scheduled_end_time);
+        return Math.max(newStart, existingStart) < Math.min(newEnd, existingEnd);
+      });
+
+    if (overlapExists) {
+      setErrorMessage("Task time overlaps with an existing task for this assignee.");
       return;
     }
 
@@ -384,22 +338,42 @@ const TaskManagement: React.FC<TaskManagementProps> = ({
       await api.post(
         "/reports/task",
         {
-          project_id: selectedProjectId,
-          title: newTaskForm.title,
-          description: newTaskForm.description,
+          project_id: newTaskForm.project_id,
+          title: isBreakTask ? "Break" : newTaskForm.title,
+          description: isBreakTask ? "" : newTaskForm.description,
           status: "To Do",
-          priority: toApiPriority(newTaskForm.priority),
-          assigned_to: [newTaskForm.assignee],
-          estimated_time: 0,
-          task_date: getToday(),
-          due_date: getToday(),
+          priority: isBreakTask ? "low" : toApiPriority(newTaskForm.priority),
+          assigned_to: [currentUserEmail],
+          task_date: newTaskForm.date,
+          due_date: newTaskForm.date,
+          scheduled_start_time: newTaskForm.start_time,
+          scheduled_end_time: newTaskForm.end_time,
+          estimated_time: duration,
+          is_break: isBreakTask,
+          dependencies_note: isBreakTask ? "" : newTaskForm.dependencies_note,
+          blockers: isBreakTask ? "" : newTaskForm.blockers,
+          support_required: isBreakTask ? "" : newTaskForm.support_required,
+          dependencies: [],
         },
         { headers: { Authorization: `Bearer ${token}` } }
       );
 
-      setNewTaskForm({ title: "", description: "", priority: "medium", assignee: "" });
+      setSelectedProjectId(newTaskForm.project_id);
+      setNewTaskForm((prev) => ({
+        ...prev,
+        title: "",
+        description: "",
+        start_time: selectedShift,
+        end_time: selectedShift === "08:00" ? "09:00" : "10:00",
+        priority: "medium",
+        task_type: "work",
+        dependencies_note: "",
+        blockers: "",
+        support_required: "",
+      }));
+      setDateFilter(newTaskForm.date);
       setShowNewTaskForm(false);
-      await loadTasks(selectedProjectId);
+      await loadTasks(newTaskForm.project_id);
     } catch (error: unknown) {
       const typed = error as { response?: { data?: { detail?: string } } };
       setErrorMessage(typed.response?.data?.detail || "Failed to create task.");
@@ -408,186 +382,42 @@ const TaskManagement: React.FC<TaskManagementProps> = ({
     }
   };
 
-  const syncParentTaskFromSubtasks = useCallback(async (parentTaskId: string, subtasks: Subtask[]) => {
-    if (!token) return;
-    const totalEstimate = subtasks.reduce((sum, subtask) => sum + (Number(subtask.estimated_time) || 0), 0);
-    const allClosed = subtasks.length > 0 && subtasks.every((subtask) => subtask.status === "completed");
-    await api.put(
-      `/reports/task/${parentTaskId}`,
-      {
-        estimated_time: totalEstimate,
-        status: allClosed ? "Done" : "To Do",
-      },
-      { headers: { Authorization: `Bearer ${token}` } }
-    );
-  }, [token]);
-
-  const addSubtask = async (parentTaskId: string) => {
-    const form = newSubtaskForm[parentTaskId];
-    if (!form || !form.title.trim()) {
-      setErrorMessage("Subtask title is required.");
-      return;
-    }
-    if (!form.assignee.trim()) {
-      setErrorMessage("Subtask assignee is required.");
-      return;
-    }
-    if (!form.estimated_time || form.estimated_time <= 0) {
-      setErrorMessage("Subtask estimated time must be greater than 0.");
-      return;
-    }
-    if (!selectedProjectId) {
-      setErrorMessage("Select a project first.");
-      return;
-    }
-
-    setSubmitting(true);
-    setErrorMessage("");
-    try {
-      await api.post(
-        "/reports/task",
-        {
-          project_id: selectedProjectId,
-          title: form.title,
-          description: withParentMarker(form.description || "", parentTaskId),
-          status: "To Do",
-          priority: toApiPriority(form.priority),
-          assigned_to: [form.assignee],
-          estimated_time: Number(form.estimated_time),
-          task_date: getToday(),
-          due_date: form.due_date || getToday(),
-        },
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-
-      const parentTask = tasks.find((task) => task.id === parentTaskId);
-      if (parentTask) {
-        const updatedSubtasks: Subtask[] = [
-          ...parentTask.subtasks,
-          {
-            id: "temp",
-            title: form.title,
-            description: form.description,
-            priority: form.priority,
-            assignee: form.assignee || undefined,
-            estimated_time: Number(form.estimated_time),
-            status: "todo",
-          },
-        ];
-        await syncParentTaskFromSubtasks(parentTaskId, updatedSubtasks);
-      }
-
-      setNewSubtaskForm((prev) => {
-        const updated = { ...prev };
-        delete updated[parentTaskId];
-        return updated;
-      });
-      setTasks((prev) =>
-        prev.map((t) => (t.id === parentTaskId ? { ...t, adding_subtask: false } : t))
-      );
-      await loadTasks(selectedProjectId);
-    } catch (error: unknown) {
-      const typed = error as { response?: { data?: { detail?: string } } };
-      setErrorMessage(typed.response?.data?.detail || "Failed to add subtask.");
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const updateSubtaskStatus = async (parentTaskId: string, subtaskId: string, newStatus: Subtask["status"]) => {
-    try {
-      await api.put(
-        `/reports/task/${subtaskId}`,
-        { status: toApiStatus(newStatus) },
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-
-      const parentTask = tasks.find((task) => task.id === parentTaskId);
-      const updatedSubtasks = (parentTask?.subtasks || []).map((subtask) =>
-        subtask.id === subtaskId ? { ...subtask, status: newStatus } : subtask
-      );
-
-      setTasks((prev) =>
-        prev.map((t) => {
-          if (t.id === parentTaskId) {
-            const updated = {
-              ...t,
-              subtasks: updatedSubtasks,
-            };
-            if (updated.subtasks.length > 0 && updated.subtasks.every((st) => st.status === "completed")) {
-              updated.status = "completed";
-            } else if (updated.subtasks.length > 0) {
-              updated.status = "todo";
-            }
-            return updated;
-          }
-          return t;
-        })
-      );
-
-      await syncParentTaskFromSubtasks(parentTaskId, updatedSubtasks);
-    } catch (error: unknown) {
-      const typed = error as { response?: { data?: { detail?: string } } };
-      setErrorMessage(typed.response?.data?.detail || "Failed to update subtask.");
-    }
-  };
-
-  const updateTaskStatus = async (taskId: string, newStatus: TreeTask["status"]) => {
+  const updateTaskStatus = async (taskId: string, newStatus: TaskStatus) => {
     const task = tasks.find((item) => item.id === taskId);
-    if (
-      newStatus === "completed" &&
-      task &&
-      task.subtasks.length > 0 &&
-      !task.subtasks.every((subtask) => subtask.status === "completed")
-    ) {
-      setErrorMessage("Task can be marked completed only after all subtasks are completed.");
-      return;
+    let actualTime: number | undefined;
+
+    if (newStatus === "completed") {
+      const promptValue = window.prompt(
+        `Planned time: ${Number(task?.estimated_time || 0)} hours\nHow much time did you actually take? (hours)`
+      );
+      if (promptValue === null) {
+        return;
+      }
+      const parsed = Number(promptValue);
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        setErrorMessage("Actual time must be a positive number.");
+        return;
+      }
+      actualTime = Number(parsed.toFixed(2));
     }
 
     try {
       await api.put(
         `/reports/task/${taskId}`,
-        { status: toApiStatus(newStatus) },
+        {
+          status: toApiStatus(newStatus),
+          actual_time: actualTime,
+        },
         { headers: { Authorization: `Bearer ${token}` } }
       );
 
       setTasks((prev) =>
-        prev.map((t) => (t.id === taskId ? { ...t, status: newStatus } : t))
+        prev.map((t) => (t.id === taskId ? { ...t, status: newStatus, actual_time: actualTime ?? t.actual_time } : t))
       );
     } catch (error: unknown) {
       const typed = error as { response?: { data?: { detail?: string } } };
       setErrorMessage(typed.response?.data?.detail || "Failed to update task.");
     }
-  };
-
-  // Delete functionality not yet implemented (no DELETE endpoint available)
-
-  const handleSelectProject = (project: ProjectOption) => {
-    setSelectedProjectId(project.id);
-    setSelectedProjectName(project.name);
-    setStatusFilter("all");
-    setShowNewTaskForm(false);
-    setNewTaskForm({ title: "", description: "", priority: "medium", assignee: "" });
-    setNewSubtaskForm({});
-    setErrorMessage("");
-  };
-
-  const handleBackToProjectSelection = () => {
-    setSelectedProjectId("");
-    setSelectedProjectName("");
-    setTasks([]);
-    setProjectMembers([]);
-    setShowNewTaskForm(false);
-    setNewSubtaskForm({});
-    setErrorMessage("");
-  };
-
-  const closeSubtaskDetailPanel = () => {
-    setTasks((prev) => prev.map((task) => ({ ...task, adding_subtask: false })));
-  };
-
-  const closeSubtaskReadPanel = () => {
-    setSelectedSubtaskDetail(null);
   };
 
   // ============================================
@@ -620,52 +450,14 @@ const TaskManagement: React.FC<TaskManagementProps> = ({
         </div>
       </div>
 
-      {!selectedProjectId && (
-        <div className="project-selection-panel">
-          <div className="project-selection-header">
-            <h2>Select Project</h2>
-            <p>Choose a project you can access, then create and organize tasks with subtasks.</p>
+      <>
+        {projectsLoading ? (
+          <div className="loading-spinner">Loading projects...</div>
+        ) : projects.length === 0 ? (
+          <div className="empty-state">
+            <p>No accessible projects found.</p>
           </div>
-
-          {projectsLoading ? (
-            <div className="loading-spinner">Loading projects...</div>
-          ) : projects.length === 0 ? (
-            <div className="empty-state">
-              <p>No accessible projects found.</p>
-            </div>
-          ) : (
-            <div className="project-selection-grid">
-              {projects.map((project) => (
-                <button
-                  key={project.id}
-                  type="button"
-                  className="project-selection-card"
-                  onClick={() => handleSelectProject(project)}
-                >
-                  <div className="project-selection-title-row">
-                    <h3>{project.name}</h3>
-                    <span className="project-selection-status">{project.status || "Active"}</span>
-                  </div>
-                  <p>{project.description || "No description provided."}</p>
-                  <span className="project-selection-action">Open Task Workspace</span>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {selectedProjectId && (
-        <>
-          <div className="selected-project-bar">
-            <div>
-              <span className="selected-project-label">Selected Project</span>
-              <strong>{selectedProjectName}</strong>
-            </div>
-            <button className="nav-btn secondary" onClick={handleBackToProjectSelection}>
-              Change Project
-            </button>
-          </div>
+        ) : null}
 
       {/* Error Banner */}
       {errorMessage && <div className="error-banner">{errorMessage}</div>}
@@ -673,6 +465,28 @@ const TaskManagement: React.FC<TaskManagementProps> = ({
       {/* Filters & Actions */}
       <div className="tm-toolbar">
         <div className="tm-filters">
+          <select
+            className="tm-select"
+            value={selectedShift}
+            onChange={(e) => {
+              const shift = e.target.value as ShiftType;
+              setSelectedShift(shift);
+              setNewTaskForm((prev) => ({
+                ...prev,
+                start_time: shift,
+                end_time: shift === "08:00" ? "09:00" : "10:00",
+              }));
+            }}
+          >
+            <option value="08:00">Shift 1 (08:00 - 18:00)</option>
+            <option value="09:00">Shift 2 (09:00 - 19:00)</option>
+          </select>
+          <input
+            className="tm-select"
+            type="date"
+            value={dateFilter}
+            onChange={(e) => setDateFilter(e.target.value)}
+          />
           <select
             className="tm-select"
             value={statusFilter}
@@ -693,58 +507,152 @@ const TaskManagement: React.FC<TaskManagementProps> = ({
         </button>
       </div>
 
+      <div className="planning-indicator">
+        <span>Shift Window: {selectedShift} - {shiftEnd} (10 hours)</span>
+        <span>Planned Work Time: {plannedHours.toFixed(2)} / 8 hours</span>
+        <span>Break Time: {breakHours.toFixed(2)} / 2 hours</span>
+        <span className={`planning-warning ${planningWarning === "Valid" ? "valid" : "warn"}`}>
+          {planningWarning}
+        </span>
+      </div>
+
       {/* New Task Form */}
       {showNewTaskForm && (
         <div className="tm-new-task-form">
           <h3>Create New Task</h3>
           <div className="form-grid">
-            <input
-              className="form-input"
-              type="text"
-              placeholder="Task Name"
-              value={newTaskForm.title}
-              onChange={(e) => setNewTaskForm((prev) => ({ ...prev, title: e.target.value }))}
-            />
-            <input
-              className="form-input"
-              type="text"
-              placeholder="Task Description"
-              value={newTaskForm.description}
-              onChange={(e) => setNewTaskForm((prev) => ({ ...prev, description: e.target.value }))}
-            />
             <select
               className="form-input"
-              value={newTaskForm.assignee}
-              onChange={(e) => setNewTaskForm((prev) => ({ ...prev, assignee: e.target.value }))}
+              value={newTaskForm.task_type}
+              onChange={(e) => setNewTaskForm((prev) => ({ ...prev, task_type: e.target.value as "work" | "break" }))}
             >
-              <option value="">Select Member *</option>
-              {projectMembers.map((member) => (
-                <option key={member.email} value={member.email}>{getMemberDisplayName(member.email)}</option>
-              ))}
+              <option value="work">Work</option>
+              <option value="break">Break</option>
             </select>
-            <select
-              className="form-input"
-              value={newTaskForm.priority}
-              onChange={(e) => setNewTaskForm((prev) => ({ ...prev, priority: e.target.value as "low" | "medium" | "high" | "critical" }))}
-            >
-              <option value="low">Low</option>
-              <option value="medium">Medium</option>
-              <option value="high">High</option>
-              <option value="critical">Critical</option>
-            </select>
-            <input
-              className="form-input"
-              type="text"
-              value="Estimated Time is auto-calculated from subtasks"
-              disabled
-            />
-            <button
-              className="nav-btn primary"
-              onClick={createTask}
-              disabled={submitting}
-            >
-              {submitting ? "Creating..." : "Create Task"}
-            </button>
+
+            {newTaskForm.task_type === "break" ? (
+              <>
+                <input
+                  className="form-input"
+                  type="time"
+                  value={newTaskForm.start_time}
+                  onChange={(e) => setNewTaskForm((prev) => ({ ...prev, start_time: e.target.value }))}
+                  placeholder="Start Time *"
+                />
+                <input
+                  className="form-input"
+                  type="time"
+                  value={newTaskForm.end_time}
+                  onChange={(e) => setNewTaskForm((prev) => ({ ...prev, end_time: e.target.value }))}
+                  placeholder="End Time *"
+                />
+                <button
+                  className="nav-btn primary"
+                  onClick={createTask}
+                  disabled={submitting}
+                >
+                  {submitting ? "Creating..." : "Create Break"}
+                </button>
+              </>
+            ) : (
+              <>
+                <select
+                  className="form-input"
+                  value={newTaskForm.project_id}
+                  onChange={(e) => {
+                    const nextId = e.target.value;
+                    setNewTaskForm((prev) => ({ ...prev, project_id: nextId }));
+                    setSelectedProjectId(nextId);
+                  }}
+                >
+                  <option value="">Select Project *</option>
+                  {projects.map((project) => (
+                    <option key={project.id} value={project.id}>{project.name}</option>
+                  ))}
+                </select>
+                <input
+                  className="form-input"
+                  type="text"
+                  placeholder="Task Title *"
+                  value={newTaskForm.title}
+                  onChange={(e) => setNewTaskForm((prev) => ({ ...prev, title: e.target.value }))}
+                />
+                <textarea
+                  className="form-input"
+                  placeholder="Description"
+                  value={newTaskForm.description}
+                  onChange={(e) => setNewTaskForm((prev) => ({ ...prev, description: e.target.value }))}
+                />
+                <input
+                  className="form-input"
+                  type="date"
+                  value={newTaskForm.date}
+                  onChange={(e) => {
+                    const nextDate = e.target.value;
+                    setNewTaskForm((prev) => ({ ...prev, date: nextDate }));
+                    setDateFilter(nextDate);
+                  }}
+                />
+                <input
+                  className="form-input"
+                  type="time"
+                  value={newTaskForm.start_time}
+                  onChange={(e) => setNewTaskForm((prev) => ({ ...prev, start_time: e.target.value }))}
+                  placeholder="Task Start From *"
+                />
+                <input
+                  className="form-input"
+                  type="time"
+                  value={newTaskForm.end_time}
+                  onChange={(e) => setNewTaskForm((prev) => ({ ...prev, end_time: e.target.value }))}
+                  placeholder="Task End *"
+                />
+                <select
+                  className="form-input"
+                  value={newTaskForm.priority}
+                  onChange={(e) => setNewTaskForm((prev) => ({ ...prev, priority: e.target.value as TaskPriority }))}
+                >
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                  <option value="critical">Critical</option>
+                </select>
+                <input
+                  className="form-input"
+                  type="text"
+                  value="Estimated Time: 0.00 hours"
+                  disabled
+                />
+                <input
+                  className="form-input"
+                  type="text"
+                  placeholder="Dependencies"
+                  value={newTaskForm.dependencies_note}
+                  onChange={(e) => setNewTaskForm((prev) => ({ ...prev, dependencies_note: e.target.value }))}
+                />
+                <input
+                  className="form-input"
+                  type="text"
+                  placeholder="Blockers"
+                  value={newTaskForm.blockers}
+                  onChange={(e) => setNewTaskForm((prev) => ({ ...prev, blockers: e.target.value }))}
+                />
+                <input
+                  className="form-input"
+                  type="text"
+                  placeholder="Support Required"
+                  value={newTaskForm.support_required}
+                  onChange={(e) => setNewTaskForm((prev) => ({ ...prev, support_required: e.target.value }))}
+                />
+                <button
+                  className="nav-btn primary"
+                  onClick={createTask}
+                  disabled={submitting}
+                >
+                  {submitting ? "Creating..." : "Create Task"}
+                </button>
+              </>
+            )}
           </div>
         </div>
       )}
@@ -762,55 +670,41 @@ const TaskManagement: React.FC<TaskManagementProps> = ({
             <table className="tm-task-table">
               <thead>
                 <tr className="tm-table-header">
-                  <th style={{ width: "8%" }}></th>
-                  <th style={{ width: "12%" }}>Status</th>
-                  <th style={{ width: "32%" }}>Name</th>
-                  <th style={{ width: "18%" }}>Assignee</th>
-                  <th style={{ width: "15%" }}>Due Date</th>
-                  <th style={{ width: "10%" }}>Priority</th>
-                  <th style={{ width: "10%" }}>ETA (h)</th>
-                  <th style={{ width: "5%" }}>Actions</th>
+                  <th>Task Title</th>
+                  <th>Start Time</th>
+                  <th>End Time</th>
+                  <th>Estimated Time</th>
+                  <th>Actual Time</th>
+                  <th>Type</th>
+                  <th>Status</th>
+                  <th>Dependencies</th>
+                  <th>Blockers</th>
+                  <th>Support Required</th>
                 </tr>
               </thead>
               <tbody>
                 {filteredTasks.map((task) => {
-                  const hasSubtasks = (task.subtasks || []).length > 0;
-                  const progress = calculateTaskProgress(task);
-
                   return (
                     <React.Fragment key={task.id}>
-                      {/* Main Task Row */}
-                      <tr className={`tm-task-row ${task.status}`} onClick={() => {
-                        if (hasSubtasks) {
-                          setTasks((prev) =>
-                            prev.map((t) => (t.id === task.id ? { ...t, expanded: !t.expanded } : t))
-                          );
-                        }
-                      }}>
-                        <td className="expand-col">
-                          {hasSubtasks && (
-                            <button
-                              className="expand-btn"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setTasks((prev) =>
-                                  prev.map((t) =>
-                                    t.id === task.id ? { ...t, expanded: !t.expanded } : t
-                                  )
-                                );
-                              }}
-                            >
-                              {task.expanded ? "v" : ">"}
-                            </button>
-                          )}
+                      <tr className={`tm-task-row ${task.status}`}>
+                        <td>
+                          <div className="name-cell">
+                            <div className="task-title-text">{task.title}</div>
+                            {task.description && <div className="task-description-text">{task.description}</div>}
+                          </div>
                         </td>
-                        <td className="status-col">
+                        <td>{task.scheduled_start_time || "-"}</td>
+                        <td>{task.scheduled_end_time || "-"}</td>
+                        <td>{Number(task.estimated_time || 0).toFixed(2)}h</td>
+                        <td>{task.actual_time ? `${Number(task.actual_time).toFixed(2)}h` : "-"}</td>
+                        <td>{task.is_break ? "Break" : "Work"}</td>
+                        <td>
                           <select
-                            className="status-select"
+                            className="status-select inline"
                             value={task.status}
                             onChange={(e) => {
                               e.stopPropagation();
-                              updateTaskStatus(task.id, e.target.value as "todo" | "in_progress" | "completed");
+                              updateTaskStatus(task.id, e.target.value as TaskStatus);
                             }}
                             onClick={(e) => e.stopPropagation()}
                           >
@@ -819,158 +713,10 @@ const TaskManagement: React.FC<TaskManagementProps> = ({
                             <option value="completed">Completed</option>
                           </select>
                         </td>
-                        <td className="name-col">
-                          <div className="name-cell">
-                            <div>
-                              <div className="task-title-text">{task.title}</div>
-                              {task.description && <div className="task-description-text">{task.description}</div>}
-                              {hasSubtasks && (
-                                <div className="subtask-indicator">
-                                  {task.subtasks.length} subtask{task.subtasks.length !== 1 ? 's' : ''} - {progress}% complete
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        </td>
-                        <td className="assignee-col">
-                          {task.assignee ? (
-                            <div className="assignee-badge">
-                              <div className="avatar" title={getMemberDisplayName(task.assignee)}>
-                                {getMemberDisplayName(task.assignee).charAt(0).toUpperCase()}
-                              </div>
-                              <span>{getMemberDisplayName(task.assignee)}</span>
-                            </div>
-                          ) : (
-                            <span className="empty-cell">-</span>
-                          )}
-                        </td>
-                        <td className="due-date-col">
-                          {task.due_date ? (
-                            <span className="due-date-text">{task.due_date}</span>
-                          ) : (
-                            <span className="empty-cell">-</span>
-                          )}
-                        </td>
-                        <td className="priority-col">
-                          <span className="priority-badge" style={{ backgroundColor: getPriorityColor(task.priority) }}>
-                            {task.priority.charAt(0).toUpperCase() + task.priority.slice(1)}
-                          </span>
-                        </td>
-                        <td className="eta-col">
-                          <span className="eta-text">{calculateEstimatedHours(task)}h</span>
-                        </td>
-                        <td className="actions-col">
-                          <div className="action-buttons">
-                            <button
-                              className="action-btn add-subtask"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setNewSubtaskForm((prev) => ({
-                                  ...prev,
-                                  [task.id]: prev[task.id] || getDefaultSubtaskForm(),
-                                }));
-                                setTasks((prev) =>
-                                  prev.map((t) =>
-                                    t.id === task.id
-                                      ? { ...t, adding_subtask: true }
-                                      : { ...t, adding_subtask: false }
-                                  )
-                                );
-                              }}
-                              title="Add Subtask"
-                            >
-                              +
-                            </button>
-                          </div>
-                        </td>
+                        <td className="tm-truncate-cell" title={task.dependencies_note || "-"}>{task.dependencies_note || "-"}</td>
+                        <td className="tm-truncate-cell" title={task.blockers || "-"}>{task.blockers || "-"}</td>
+                        <td className="tm-truncate-cell" title={task.support_required || "-"}>{task.support_required || "-"}</td>
                       </tr>
-
-                      {/* Subtasks (Expanded) */}
-                      {task.expanded && hasSubtasks && (
-                        <>
-                          {task.subtasks.map((subtask) => (
-                            <tr
-                              key={subtask.id}
-                              className="tm-subtask-row"
-                              onClick={() =>
-                                setSelectedSubtaskDetail({
-                                  parentTaskId: task.id,
-                                  parentTaskTitle: task.title,
-                                  subtask,
-                                })
-                              }
-                            >
-                              <td className="expand-col"></td>
-                              <td className="status-col">
-                                <input
-                                  type="checkbox"
-                                  checked={subtask.status === "completed"}
-                                  onChange={(e) => {
-                                    e.stopPropagation();
-                                    updateSubtaskStatus(task.id, subtask.id, e.target.checked ? "completed" : "todo");
-                                  }}
-                                  className="subtask-checkbox"
-                                  title={subtask.status === "completed" ? "Mark as incomplete" : "Mark as complete"}
-                                />
-                              </td>
-                              <td className="name-col">
-                                <div className="subtask-name">
-                                  <span
-                                    style={{
-                                      textDecoration: subtask.status === "completed" ? "line-through" : "none",
-                                      opacity: subtask.status === "completed" ? 0.6 : 1,
-                                    }}
-                                  >
-                                    {subtask.title}
-                                  </span>
-                                  <div className="subtask-open-hint">Click to view details</div>
-                                </div>
-                              </td>
-                              <td className="assignee-col">
-                                {subtask.assignee ? (
-                                  <div className="assignee-badge">
-                                    <div className="avatar" title={getMemberDisplayName(subtask.assignee)}>
-                                      {getMemberDisplayName(subtask.assignee).charAt(0).toUpperCase()}
-                                    </div>
-                                    <span>{getMemberDisplayName(subtask.assignee)}</span>
-                                  </div>
-                                ) : (
-                                  <span className="empty-cell">-</span>
-                                )}
-                              </td>
-                              <td className="due-date-col">
-                                {subtask.due_date ? (
-                                  <span className="due-date-text">{subtask.due_date}</span>
-                                ) : (
-                                  <span className="empty-cell">-</span>
-                                )}
-                              </td>
-                              <td className="priority-col">
-                                <span className="priority-badge" style={{ backgroundColor: getPriorityColor(subtask.priority) }}>
-                                  {subtask.priority.charAt(0).toUpperCase() + subtask.priority.slice(1)}
-                                </span>
-                              </td>
-                              <td className="eta-col">
-                                <span className="eta-text">{Number(subtask.estimated_time) || 0}h</span>
-                              </td>
-                              <td className="actions-col">
-                                {/* Delete button - DELETE endpoint not yet available
-                                <button
-                                  className="action-btn delete"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    deleteSubtask(subtask.id);
-                                  }}
-                                  title="Delete Subtask"
-                                >
-                                  X
-                                </button>
-                                */}
-                              </td>
-                            </tr>
-                          ))}
-                        </>
-                      )}
                     </React.Fragment>
                   );
                 })}
@@ -979,252 +725,7 @@ const TaskManagement: React.FC<TaskManagementProps> = ({
           </div>
         )}
       </div>
-
-      {activeSubtaskParentTask && (
-        <div className="subtask-detail-overlay" role="dialog" aria-modal="true">
-          <div className="subtask-detail-page">
-            <aside className="subtask-detail-sidebar">
-              <h4>Task Tree</h4>
-              <div className="subtask-parent-item active">{activeSubtaskParentTask.title}</div>
-              <div className="subtask-tree-hint">Creating a subtask under this parent task.</div>
-            </aside>
-
-            <section className="subtask-detail-content">
-              <div className="subtask-detail-topbar">
-                <button className="nav-btn secondary" onClick={closeSubtaskDetailPanel}>
-                  Back Back to Task List
-                </button>
-                <button
-                  className="nav-btn primary"
-                  onClick={() => addSubtask(activeSubtaskParentTask.id)}
-                  disabled={submitting}
-                >
-                  {submitting ? "Creating..." : "Create Subtask"}
-                </button>
-              </div>
-
-              <div className="subtask-detail-breadcrumb">
-                Subtask of <strong>{activeSubtaskParentTask.title}</strong>
-              </div>
-
-              <h2 className="subtask-detail-title">Create Subtask</h2>
-
-              <div className="subtask-detail-summary">
-                Add complete details for this subtask. It will update parent progress and estimated time automatically.
-              </div>
-
-              <div className="subtask-detail-info-grid">
-                <div className="detail-item">
-                  <span>Status</span>
-                  <strong>To Do</strong>
-                </div>
-                <div className="detail-item">
-                  <span>Parent Task</span>
-                  <strong>{activeSubtaskParentTask.title}</strong>
-                </div>
-                <div className="detail-item">
-                  <span>Priority</span>
-                  <strong>{(newSubtaskForm[activeSubtaskParentTask.id]?.priority || "medium").toUpperCase()}</strong>
-                </div>
-                <div className="detail-item">
-                  <span>Time Estimate</span>
-                  <strong>{newSubtaskForm[activeSubtaskParentTask.id]?.estimated_time || 1}h</strong>
-                </div>
-              </div>
-
-              <div className="subtask-detail-form">
-                <label>
-                  Subtask Name *
-                  <input
-                    className="form-input"
-                    type="text"
-                    placeholder="Enter subtask name"
-                    value={newSubtaskForm[activeSubtaskParentTask.id]?.title || ""}
-                    onChange={(e) =>
-                      setNewSubtaskForm((prev) => ({
-                        ...prev,
-                        [activeSubtaskParentTask.id]: {
-                          ...(prev[activeSubtaskParentTask.id] || getDefaultSubtaskForm()),
-                          title: e.target.value,
-                        },
-                      }))
-                    }
-                  />
-                </label>
-
-                <label>
-                  Description
-                  <textarea
-                    className="form-input subtask-detail-textarea"
-                    placeholder="Describe this subtask"
-                    value={newSubtaskForm[activeSubtaskParentTask.id]?.description || ""}
-                    onChange={(e) =>
-                      setNewSubtaskForm((prev) => ({
-                        ...prev,
-                        [activeSubtaskParentTask.id]: {
-                          ...(prev[activeSubtaskParentTask.id] || getDefaultSubtaskForm()),
-                          description: e.target.value,
-                        },
-                      }))
-                    }
-                  />
-                </label>
-
-                <div className="subtask-detail-form-grid">
-                  <label>
-                    Assignee *
-                    <select
-                      className="form-input"
-                      value={newSubtaskForm[activeSubtaskParentTask.id]?.assignee || ""}
-                      onChange={(e) =>
-                        setNewSubtaskForm((prev) => ({
-                          ...prev,
-                          [activeSubtaskParentTask.id]: {
-                            ...(prev[activeSubtaskParentTask.id] || getDefaultSubtaskForm()),
-                            assignee: e.target.value,
-                          },
-                        }))
-                      }
-                    >
-                      <option value="">Select Member *</option>
-                      {projectMembers.map((member) => (
-                        <option key={member.email} value={member.email}>{getMemberDisplayName(member.email)}</option>
-                      ))}
-                    </select>
-                  </label>
-
-                  <label>
-                    Priority
-                    <select
-                      className="form-input"
-                      value={newSubtaskForm[activeSubtaskParentTask.id]?.priority || "medium"}
-                      onChange={(e) =>
-                        setNewSubtaskForm((prev) => ({
-                          ...prev,
-                          [activeSubtaskParentTask.id]: {
-                            ...(prev[activeSubtaskParentTask.id] || getDefaultSubtaskForm()),
-                            priority: e.target.value as "low" | "medium" | "high" | "critical",
-                          },
-                        }))
-                      }
-                    >
-                      <option value="low">Low</option>
-                      <option value="medium">Medium</option>
-                      <option value="high">High</option>
-                      <option value="critical">Critical</option>
-                    </select>
-                  </label>
-
-                  <label>
-                    Estimate (hours) *
-                    <input
-                      className="form-input"
-                      type="number"
-                      min={1}
-                      placeholder="1"
-                      value={newSubtaskForm[activeSubtaskParentTask.id]?.estimated_time || 1}
-                      onChange={(e) =>
-                        setNewSubtaskForm((prev) => ({
-                          ...prev,
-                          [activeSubtaskParentTask.id]: {
-                            ...(prev[activeSubtaskParentTask.id] || getDefaultSubtaskForm()),
-                            estimated_time: Number(e.target.value) || 0,
-                          },
-                        }))
-                      }
-                    />
-                  </label>
-
-                  <label>
-                    Due Date
-                    <input
-                      className="form-input"
-                      type="date"
-                      value={newSubtaskForm[activeSubtaskParentTask.id]?.due_date || ""}
-                      onChange={(e) =>
-                        setNewSubtaskForm((prev) => ({
-                          ...prev,
-                          [activeSubtaskParentTask.id]: {
-                            ...(prev[activeSubtaskParentTask.id] || getDefaultSubtaskForm()),
-                            due_date: e.target.value,
-                          },
-                        }))
-                      }
-                    />
-                  </label>
-                </div>
-              </div>
-            </section>
-          </div>
-        </div>
-      )}
-
-      {selectedSubtaskDetail && (
-        <div className="subtask-detail-overlay" role="dialog" aria-modal="true">
-          <div className="subtask-detail-page">
-            <aside className="subtask-detail-sidebar">
-              <h4>Task Tree</h4>
-              <div className="subtask-parent-item">{selectedSubtaskDetail.parentTaskTitle}</div>
-              <div className="subtask-parent-item active" style={{ marginTop: 8 }}>
-                {selectedSubtaskDetail.subtask.title}
-              </div>
-              <div className="subtask-tree-hint">Detailed subtask view from the dropdown list.</div>
-            </aside>
-
-            <section className="subtask-detail-content">
-              <div className="subtask-detail-topbar">
-                <button className="nav-btn secondary" onClick={closeSubtaskReadPanel}>
-                  Back Back to Subtasks
-                </button>
-              </div>
-
-              <div className="subtask-detail-breadcrumb">
-                Subtask of <strong>{selectedSubtaskDetail.parentTaskTitle}</strong>
-              </div>
-
-              <h2 className="subtask-detail-title">{selectedSubtaskDetail.subtask.title}</h2>
-
-              <div className="subtask-detail-info-grid">
-                <div className="detail-item">
-                  <span>Status</span>
-                  <strong>{selectedSubtaskDetail.subtask.status.replace("_", " ").toUpperCase()}</strong>
-                </div>
-                <div className="detail-item">
-                  <span>Assignee</span>
-                  <strong>
-                    {selectedSubtaskDetail.subtask.assignee
-                      ? getMemberDisplayName(selectedSubtaskDetail.subtask.assignee)
-                      : "Unassigned"}
-                  </strong>
-                </div>
-                <div className="detail-item">
-                  <span>Priority</span>
-                  <strong>{selectedSubtaskDetail.subtask.priority.toUpperCase()}</strong>
-                </div>
-                <div className="detail-item">
-                  <span>Time Estimate</span>
-                  <strong>{Number(selectedSubtaskDetail.subtask.estimated_time) || 0}h</strong>
-                </div>
-                <div className="detail-item">
-                  <span>Due Date</span>
-                  <strong>{selectedSubtaskDetail.subtask.due_date || "Not set"}</strong>
-                </div>
-                <div className="detail-item">
-                  <span>Parent Task</span>
-                  <strong>{selectedSubtaskDetail.parentTaskTitle}</strong>
-                </div>
-              </div>
-
-              <div className="subtask-readonly-description">
-                <h4>Description</h4>
-                <p>{selectedSubtaskDetail.subtask.description || "No description provided."}</p>
-              </div>
-            </section>
-          </div>
-        </div>
-      )}
-        </>
-      )}
+      </>
     </div>
   );
 };

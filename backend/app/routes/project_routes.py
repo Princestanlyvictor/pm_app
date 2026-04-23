@@ -1,4 +1,5 @@
 from datetime import datetime, date
+import re
 from typing import Any, Dict, List, Literal, Optional
 
 from bson import ObjectId
@@ -639,26 +640,42 @@ async def get_project_tasks(
         ]
 
     task_rows = await reports.find(query).sort("created_at", -1).to_list(None)
-    items = [
-        {
-            "id": str(task.get("_id")),
-            "project_id": task.get("project_id"),
-            "title": task.get("title"),
-            "description": task.get("description"),
-            "status": task.get("status"),
-            "priority": task.get("priority"),
-            "stage": task.get("stage"),
-            "task_date": task.get("task_date"),
-            "due_date": task.get("due_date") or task.get("task_date"),
-            "estimated_time": task.get("estimated_time"),
-            "dependencies": task.get("dependencies", []),
-            "resolved_dependencies": task.get("resolved_dependencies", []),
-            "assigned_to": task.get("assigned_to", []),
-            "created_by": task.get("created_by"),
-            "updated_at": task.get("updated_at"),
-        }
-        for task in task_rows
-    ]
+    marker_regex = re.compile(r"^\s*\[\[SUBTASK_OF:([^\]]+)\]\]\s*", re.IGNORECASE)
+
+    items = []
+    for task in task_rows:
+        raw_description = str(task.get("description") or "")
+        match = marker_regex.match(raw_description)
+        parent_task_id = str(task.get("parent_task_id") or "").strip() or (match.group(1).strip() if match else "")
+        cleaned_description = marker_regex.sub("", raw_description).strip()
+
+        items.append(
+            {
+                "id": str(task.get("_id")),
+                "project_id": task.get("project_id"),
+                "parent_task_id": parent_task_id or None,
+                "title": task.get("title"),
+                "description": cleaned_description,
+                "status": task.get("status"),
+                "priority": task.get("priority"),
+                "stage": task.get("stage"),
+                "task_date": task.get("task_date"),
+                "due_date": task.get("due_date") or task.get("task_date"),
+                "scheduled_start_time": task.get("scheduled_start_time"),
+                "scheduled_end_time": task.get("scheduled_end_time"),
+                "estimated_time": task.get("estimated_time"),
+                "actual_time": task.get("actual_time"),
+                "is_break": bool(task.get("is_break", False)),
+                "blockers": task.get("blockers", ""),
+                "support_required": task.get("support_required", ""),
+                "dependencies_note": task.get("dependencies_note", ""),
+                "dependencies": task.get("dependencies", []),
+                "resolved_dependencies": task.get("resolved_dependencies", []),
+                "assigned_to": task.get("assigned_to", []),
+                "created_by": task.get("created_by"),
+                "updated_at": task.get("updated_at"),
+            }
+        )
 
     if view == "kanban":
         grouped: Dict[str, List[Dict[str, Any]]] = {"To Do": [], "In Progress": [], "Done": []}
